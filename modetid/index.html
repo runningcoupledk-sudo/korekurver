@@ -1,0 +1,1984 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mødetid</title>
+<!--
+  MØDETID – hvor langt fra brandstationen kan en deltidsbrandmand bo?
+  ====================================================================
+  Søster-app til "Kørekurver". Her regnes den modsatte vej: fra bopælen ind til
+  stationen, i egen bil og efter de almindelige færdselsregler.
+  Sådan bruges filen:
+    1. Gem filen på computeren (fx på skrivebordet).
+    2. Dobbeltklik på den. Den åbner i din almindelige browser (Chrome, Edge, Firefox, Safari).
+    3. Der skal være internetforbindelse: kort, vejnet og adressesøgning hentes fra OpenStreetMap.
+
+  Filen indeholder alt: udseende (CSS), program (JavaScript) og hjælpetekst.
+  Programmet er delt op i nummererede afsnit med forklaringer på dansk,
+  så man kan følge, hvad der sker, uden at være programmør.
+
+  Data og tjenester (alle gratis og åbne):
+    - Vejnet:      OpenStreetMap via Overpass API
+    - Adressesøgning: Nominatim (OpenStreetMap)
+    - Kortbaggrund:   CARTO eller OpenStreetMap
+    - Kort-bibliotek: Leaflet · Geometri: Turf.js · PDF: jsPDF
+-->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: arbejdspanel til venstre, kort til højre, resultattabel under kortet. */
+:root{
+  --bg:#eef0ee; --panel:#ffffff; --fg:#1b2124; --muted:#5b666b; --line:#d6dbd9;
+  --field:#f6f7f5; --accent:#c42a1f; --accent-fg:#ffffff; --accent-soft:#f8e3e0;
+  --ok:#1f7a45; --warn:#a86400; --err:#b3261e;
+  --f-display:"Barlow Semi Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"Barlow",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#121618; --panel:#1a2023; --fg:#e4e9ea; --muted:#98a3a7; --line:#2d3639;
+    --field:#212a2d; --accent:#ff5d4d; --accent-fg:#1a0c0a; --accent-soft:#3a1f1c;
+    --ok:#5cc98a; --warn:#e3a540; --err:#ff7a6e; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#121618; --panel:#1a2023; --fg:#e4e9ea; --muted:#98a3a7; --line:#2d3639;
+  --field:#212a2d; --accent:#ff5d4d; --accent-fg:#1a0c0a; --accent-soft:#3a1f1c;
+  --ok:#5cc98a; --warn:#e3a540; --err:#ff7a6e; color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.45 var(--f-body)}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.app{display:grid;grid-template-columns:minmax(340px,400px) 1fr;grid-template-rows:auto 1fr;height:100%}
+header.top{grid-column:1/-1;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+  padding:10px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px));
+  border-bottom:1px solid var(--line);background:var(--panel)}
+header.top h1{font:700 22px/1 var(--f-display);margin:0;letter-spacing:.01em}
+header.top h1 span{color:var(--accent)}
+header.top p{margin:0;color:var(--muted);font-size:14px}
+header.top a.app-link{margin-left:auto;color:var(--accent);font-weight:600;font-size:14px;text-decoration:none}
+header.top a.app-link:hover{text-decoration:underline}
+.bopael{display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line)}
+.bopael:last-child{border-bottom:0}
+.bopael .hus{width:22px;height:22px;border-radius:50%;background:var(--fg);color:var(--bg);display:grid;place-items:center;font:700 12px var(--f-display)}
+.bopael .tider{grid-column:2/-1;display:flex;gap:6px;flex-wrap:wrap;font:12px var(--f-mono)}
+.chip{display:inline-block;padding:1px 7px;border-radius:10px;font:600 12px var(--f-mono);font-variant-numeric:tabular-nums;border:1px solid var(--line)}
+.chip.ok{color:var(--ok);border-color:var(--ok)}
+.chip.nej{color:var(--err);border-color:var(--err)}
+.chip.ukendt{color:var(--muted)}
+.bopael button.vis{border:0;background:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0;text-align:left}
+.husikon{background:var(--fg);color:var(--bg);border:2px solid #fff;border-radius:50%;display:grid!important;place-items:center;font:700 11px var(--f-display);box-shadow:0 1px 4px rgba(0,0,0,.4)}
+
+/* ---------- Sidepanel ---------- */
+aside.side{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line);background:var(--panel)}
+.side-scroll{flex:1;overflow:auto;padding:4px 0 12px}
+details.sek{border-bottom:1px solid var(--line)}
+details.sek>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;
+  padding:12px 16px;font:600 15px/1.2 var(--f-display);text-transform:uppercase;letter-spacing:.06em}
+details.sek>summary::-webkit-details-marker{display:none}
+details.sek>summary::after{content:"+";font:500 18px/1 var(--f-mono);color:var(--muted)}
+details.sek[open]>summary::after{content:"–"}
+details.sek>summary small{font:400 12px var(--f-body);text-transform:none;letter-spacing:0;color:var(--muted);margin-left:auto;margin-right:10px}
+.sek-indhold{padding:0 16px 14px;display:flex;flex-direction:column;gap:10px}
+.hint{color:var(--muted);font-size:13px;margin:0}
+label.f{display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--muted)}
+label.f>span{font-weight:500}
+input[type=text],input[type=number],input[type=time],input[type=search],select{
+  background:var(--field);border:1px solid var(--line);border-radius:4px;padding:6px 8px;min-width:0;width:100%}
+input[type=number]{font-family:var(--f-mono);font-size:14px}
+.raekke{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.raekke>*{flex:1 1 0;min-width:0}
+.chk{display:flex;gap:8px;align-items:flex-start;font-size:14px;cursor:pointer}
+.chk input{margin-top:3px;accent-color:var(--accent)}
+.knap{border:1px solid var(--line);background:var(--field);border-radius:4px;padding:7px 10px;cursor:pointer;font-weight:500;font-size:14px;white-space:nowrap}
+.knap:hover{border-color:var(--muted)}
+.knap.aktiv{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.knap.lille{padding:3px 8px;font-size:13px}
+.knap-raekke{display:flex;flex-wrap:wrap;gap:6px}
+.ikonknap{border:0;background:none;cursor:pointer;color:var(--muted);font-size:18px;line-height:1;padding:2px 6px;border-radius:4px}
+.ikonknap:hover{color:var(--err);background:var(--accent-soft)}
+
+table.tab{border-collapse:collapse;width:100%;font-size:13px}
+table.tab th{font:600 12px var(--f-display);text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:left;padding:4px 4px;border-bottom:1px solid var(--line)}
+table.tab td{padding:3px 4px;border-bottom:1px solid var(--line);vertical-align:middle}
+table.tab td input{padding:4px 5px}
+.tab-wrap{overflow-x:auto}
+table.tab td.tal{font:13px var(--f-mono);font-variant-numeric:tabular-nums;text-align:right;padding-right:8px}
+
+.station{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line)}
+.station .afg{grid-column:2/-1;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.station .afg select{width:auto;padding:3px 6px;font-family:var(--f-mono);font-size:13px}
+.station:last-child{border-bottom:0}
+.snr{width:24px;height:24px;border-radius:3px;background:var(--accent);color:var(--accent-fg);display:grid;place-items:center;font:700 13px var(--f-display)}
+.koord{grid-column:2/-1;font:12px var(--f-mono);color:var(--muted);margin-top:-4px}
+.soegeres{display:flex;flex-direction:column;gap:4px}
+.soegeres button{text-align:left;border:1px solid var(--line);background:var(--field);border-radius:4px;padding:6px 8px;cursor:pointer;font-size:13px}
+.soegeres button:hover{border-color:var(--accent)}
+
+.periode{border:1px solid var(--line);border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px}
+.periode .top{display:flex;gap:6px;align-items:center}
+.periode .dage{display:flex;gap:10px;flex-wrap:wrap;font-size:13px}
+.periode .fak{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.periode .fak label{font-size:11px}
+.graf-wrap{border:1px solid var(--line);border-radius:6px;padding:6px 6px 2px;background:var(--field)}
+.graf-wrap svg{display:block;width:100%;height:auto}
+.graf-wrap text{font:10px var(--f-body);fill:var(--muted)}
+.scen-boks{border-left:3px solid var(--line);padding-left:10px;display:flex;flex-direction:column;gap:6px}
+.scen-boks.a{border-color:var(--accent)}
+.scen-navn{font:600 13px var(--f-display);text-transform:uppercase;letter-spacing:.06em}
+.per-vis{font-size:13px;color:var(--muted)}
+.per-vis b{color:var(--fg);font-weight:600}
+
+.side-fod{border-top:1px solid var(--line);padding:12px max(16px,env(safe-area-inset-left,0px)) calc(12px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;background:var(--panel)}
+.beregn{background:var(--accent);color:var(--accent-fg);border:0;border-radius:5px;padding:12px;font:700 17px var(--f-display);letter-spacing:.04em;text-transform:uppercase;cursor:pointer}
+.beregn:disabled{opacity:.55;cursor:progress}
+.status{font-size:13px;min-height:1.4em;color:var(--muted)}
+.status.ok{color:var(--ok)} .status.fejl{color:var(--err)} .status.adv{color:var(--warn)}
+
+/* ---------- Kort og resultater ---------- */
+main.hoved{display:grid;grid-template-rows:1fr auto;min-height:0;min-width:0}
+.kortomr{display:grid;grid-template-columns:1fr;min-height:0;position:relative}
+.kortomr.side{grid-template-columns:1fr 1fr;gap:2px;background:var(--line)}
+.kort{min-height:300px;height:100%;position:relative}
+.kort.klikmode{cursor:crosshair}
+.kort .leaflet-container{background:#dfe4e2}
+.kortbanner{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:800;background:var(--fg);color:var(--bg);padding:7px 12px;border-radius:4px;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:nowrap}
+.legende{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:8px 10px;font-size:12px;line-height:1.5;box-shadow:0 1px 4px rgba(0,0,0,.15);min-width:150px}
+.legende h4{margin:0 0 4px;font:600 12px var(--f-display);text-transform:uppercase;letter-spacing:.06em}
+.legende .l{display:flex;align-items:center;gap:7px}
+.legende i{display:inline-block;width:18px;height:11px;border-radius:2px}
+.legende i.str{background:none!important;border-top:2.5px dashed;height:0;border-radius:0}
+.kortetiket{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:4px 8px;font:600 12px var(--f-display);letter-spacing:.05em;text-transform:uppercase}
+.stationsikon{background:var(--accent);color:#fff;border:2px solid #fff;border-radius:4px;display:grid!important;place-items:center;font:700 13px var(--f-display);box-shadow:0 1px 4px rgba(0,0,0,.4)}
+
+.resultater{border-top:1px solid var(--line);background:var(--panel);max-height:38vh;overflow:auto;padding:10px max(16px,env(safe-area-inset-right,0px)) 12px max(16px,env(safe-area-inset-left,0px))}
+.res-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.res-top h2{font:700 15px var(--f-display);text-transform:uppercase;letter-spacing:.06em;margin:0}
+table.res{border-collapse:collapse;width:100%;font-size:13px}
+table.res th{font:600 11px var(--f-display);text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:right;padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.res th:first-child,table.res td:first-child{text-align:left}
+table.res td{padding:5px 8px;text-align:right;font:13px var(--f-mono);font-variant-numeric:tabular-nums;border-bottom:1px solid var(--line);white-space:nowrap}
+table.res td .sw{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
+.tom{color:var(--muted);font-size:14px;padding:6px 0}
+.neg{color:var(--err)} .pos{color:var(--ok)}
+
+.hjaelp{font-size:14px;line-height:1.55}
+.hjaelp h3{font:600 14px var(--f-display);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 2px}
+.hjaelp p,.hjaelp ul{margin:0 0 6px;max-width:65ch}
+.hjaelp ul{padding-left:18px}
+
+@media (max-width: 860px){
+  .app{display:flex;flex-direction:column;height:auto;min-height:100%}
+  main.hoved{order:1}
+  aside.side{order:2;border-right:0;border-top:1px solid var(--line)}
+  .kortomr{height:62vh}
+  .kortomr.side{grid-template-columns:1fr;grid-template-rows:1fr 1fr;height:90vh}
+  .side-fod{position:sticky;bottom:0}
+  .resultater{max-height:none}
+}
+@media (prefers-reduced-motion: reduce){ *{transition:none!important;animation:none!important} }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <h1>Møde<span>tid</span></h1>
+    <p>Hvor langt fra brandstationen kan en deltidsbrandmand bo og nå frem inden for mødetiden – almindelige færdselsregler</p>
+    <a class="app-link" href="../">Kørekurver for brandbiler →</a>
+  </header>
+
+  <!-- ================= SIDEPANEL MED INDSTILLINGER ================= -->
+  <aside class="side" id="side">
+    <div class="side-scroll">
+
+      <details class="sek" open>
+        <summary>Brandstationer <small id="antalStationer"></small></summary>
+        <div class="sek-indhold">
+          <div class="raekke">
+            <input type="search" id="soegFelt" placeholder="Søg adresse, fx Vestergade 10, Odense" aria-label="Søg adresse">
+            <button class="knap" id="soegKnap" style="flex:0 0 auto">Søg</button>
+          </div>
+          <div class="soegeres" id="soegeRes"></div>
+          <button class="knap" id="klikStation">+ Placér station ved klik på kortet</button>
+          <div id="stationsListe"></div>
+          <p class="hint">Træk i stationsmarkøren for at flytte den. Med flere aktive stationer viser kurverne, hvor man kan bo og nå frem til mindst én af dem.</p>
+        </div>
+      </details>
+
+      <details class="sek" open>
+        <summary>Mødetid</summary>
+        <div class="sek-indhold">
+          <label class="f"><span>Mødetid i minutter fra alarm (adskil med komma, højst 6)</span>
+            <input type="text" id="tiderFelt" value="3, 4, 5">
+          </label>
+          <div class="raekke">
+            <label class="f"><span>Til bilen kører (min)</span><input type="number" min="0" max="5" step="0.25" data-k="klar" data-t="num"></label>
+            <label class="f"><span>Parkering til fremmøde (min)</span><input type="number" min="0" max="5" step="0.25" data-k="parkering" data-t="num"></label>
+          </div>
+          <p class="hint">Mødetid = tid til at komme ud i bilen + køretid + tid fra parkeringspladsen ind på stationen. Den længste mødetid er kravet – fx 5 min.</p>
+        </div>
+      </details>
+
+      <details class="sek" open>
+        <summary>Test en bopæl <small id="antalBopael"></small></summary>
+        <div class="sek-indhold">
+          <div class="raekke">
+            <input type="search" id="bopSoeg" placeholder="Adresse, fx Skovvej 4, Tommerup" aria-label="Søg bopæl">
+            <button class="knap" id="bopSoegKnap" style="flex:0 0 auto">Test</button>
+          </div>
+          <div class="soegeres" id="bopSoegeRes"></div>
+          <button class="knap" id="klikBopael">+ Vælg bopæl ved klik på kortet</button>
+          <div id="bopaeleListe"></div>
+          <p class="hint">Se mødetiden fra en bestemt adresse – fx en ansøger. Ruten vises på kortet. Bopælene gemmes og regnes igen ved hver beregning.</p>
+        </div>
+      </details>
+
+      <details class="sek" open>
+        <summary>Tidspunkt</summary>
+        <div class="sek-indhold">
+          <div class="scen-boks a">
+            <div class="scen-navn">Scenarie A</div>
+            <div class="raekke">
+              <label class="f"><span>Dag</span><select data-k="scenA.dag" id="dagA"></select></label>
+              <label class="f"><span>Klokken</span><input type="time" data-k="scenA.tid"></label>
+            </div>
+            <div class="per-vis" id="perA"></div>
+          </div>
+          <label class="chk"><input type="checkbox" data-k="sammenlign"> Sammenlign med et andet tidspunkt (scenarie B)</label>
+          <div class="scen-boks" id="scenBBoks">
+            <div class="scen-navn">Scenarie B</div>
+            <div class="raekke">
+              <label class="f"><span>Dag</span><select data-k="scenB.dag" id="dagB"></select></label>
+              <label class="f"><span>Klokken</span><input type="time" data-k="scenB.tid"></label>
+            </div>
+            <div class="per-vis" id="perB"></div>
+            <label class="f"><span>Visning</span>
+              <select data-k="visning">
+                <option value="overlay">Oven på hinanden (B som stiplede linjer)</option>
+                <option value="side">Side om side (to kort)</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </details>
+
+      <details class="sek">
+        <summary>Hastigheder</summary>
+        <div class="sek-indhold">
+          <label class="f"><span>Kør med (% af hastighedsgrænsen)</span><input type="number" min="50" max="100" step="5" data-k="fartPct" data-t="num"></label>
+          <label class="chk"><input type="checkbox" data-k="brugOsmHastighed"> Brug skiltet hastighed fra OpenStreetMap, hvor den er registreret</label>
+          <div class="tab-wrap">
+            <table class="tab" id="vejTabel"></table>
+          </div>
+          <p class="hint">Almindelige færdselsregler: brandmanden kører aldrig over hastighedsgrænsen. 100 % betyder præcis grænsen. <b>Uden skilt</b> bruges, hvor OpenStreetMap ikke kender grænsen. Vejdirektoratets håndbog angiver fri hastighed omtrent lig grænsen (by 50, land 80–85, motorvej 105–115 km/t).</p>
+          <details class="hint"><summary style="cursor:pointer">Hvordan inddeles vejene?</summary>
+            <p class="hint" style="margin-top:6px"><b>Motorvej:</b> motorveje og ramper. <b>Landevej:</b> hoved-, primær- og sekundærveje (bliver til byvej, hvis grænsen er 60 km/t eller lavere). <b>Byvej:</b> fordelingsveje og mindre veje (bliver landevej ved grænse over 60). <b>Villavej:</b> boligveje, opholds- og legeområder og (hvis valgt) servicevej.</p>
+          </details>
+        </div>
+      </details>
+
+      <details class="sek">
+        <summary>Kryds og ensretning</summary>
+        <div class="sek-indhold">
+          <p class="hint"><b>Grundtid uden anden trafik:</b> ventetid for en almindelig bil, fx rødt lys om natten. Vejdirektoratets håndbog regner op til 10 sek. som serviceniveau A. Ventetid på grund af trafik lægges oven i – se Fremkommelighed.</p>
+          <div class="raekke">
+            <label class="f"><span>Lyskryds (sek.)</span><input type="number" min="0" step="1" data-k="krydsGrund.signal" data-t="num"></label>
+            <label class="f"><span>Rundkørsel (sek.)</span><input type="number" min="0" step="1" data-k="krydsGrund.rundkorsel" data-t="num"></label>
+            <label class="f"><span>Vigepligt (sek.)</span><input type="number" min="0" step="1" data-k="krydsGrund.kryds" data-t="num"></label>
+          </div>
+          <p class="hint">Vigepligt gælder, når bilen kommer fra en mindre vej ud på en større. Kryds på vej med forkørselsret koster det halve. Ensretning og svingforbud fra OpenStreetMap overholdes altid.</p>
+        </div>
+      </details>
+
+      <details class="sek">
+        <summary>Fremkommelighed <small>Vejdirektoratets model</small></summary>
+        <div class="sek-indhold">
+          <p class="hint">Trafikken følger Vejdirektoratets døgnprofil for den valgte dag. Jo tættere en vej er på sin kapacitet, jo langsommere går det – mest i krydsene, mindre på strækningerne.</p>
+          <div class="graf-wrap"><svg id="doegnGraf" viewBox="0 0 360 150" role="img" aria-label="Trafik over døgnet for de fire dagtyper"></svg></div>
+          <div class="tab-wrap">
+            <table class="tab" id="trafikTabel"></table>
+          </div>
+          <p class="hint"><b>Belastningsgrad</b> er trafikken i forhold til vejens kapacitet (1,0 = fuld). <b>Myldretid</b> er den typiske belastning i hverdagens travleste time. Har I trafiktal fra kommunen eller Vejdirektoratet, kan tallene sættes præcist. En brandmand i egen bil kører som al anden trafik og får hele forsinkelsen.</p>
+          <p class="hint">Kilde: Vejdirektoratet, Håndbog Kapacitet og serviceniveau (2024), figur 4.20–4.22, 5.4, 6.4, 7.1 og 10.5.</p>
+        </div>
+      </details>
+
+      <details class="sek">
+        <summary>Spærringer og vejarbejde <small id="antalSparr"></small></summary>
+        <div class="sek-indhold">
+          <p class="hint">Vælg type og klik på vejen i kortet. Alle vejstykker inden for radius rammes – fx en lukket bro eller et vejarbejde.</p>
+          <div class="knap-raekke">
+            <button class="knap" id="klikLukket">Markér lukket vej</button>
+            <button class="knap" id="klikArbejde">Markér vejarbejde</button>
+          </div>
+          <div class="raekke">
+            <label class="f"><span>Radius (m)</span><input type="number" min="5" step="5" id="sparRadius" value="30"></label>
+            <label class="f"><span>Vejarbejde: % langsommere</span><input type="number" min="1" max="95" step="5" id="sparFald" value="50"></label>
+          </div>
+          <div id="sparListe"></div>
+        </div>
+      </details>
+
+      <details class="sek">
+        <summary>Beregning og kort</summary>
+        <div class="sek-indhold">
+          <div class="raekke">
+            <label class="f"><span>Søgeradius (km)</span><input type="number" min="1" max="60" step="1" data-k="beregning.radiusKm" data-t="num" id="radiusFelt"></label>
+            <label class="f"><span>Opløsning (m)</span><input type="number" min="40" max="500" step="10" data-k="beregning.celle" data-t="num"></label>
+          </div>
+          <label class="f"><span>Område medregnes, hvis det ligger højst så langt fra en nåelig vej (m)</span>
+            <input type="number" min="20" max="1000" step="10" data-k="beregning.vejbuffer" data-t="num">
+          </label>
+          <label class="chk"><input type="checkbox" data-k="beregning.servicevej"> Medtag servicevejene (adgangsveje til virksomheder, institutioner m.m.) – giver større datamængde</label>
+          <label class="f"><span>Personer pr. adresse (til skøn over indbyggere)</span>
+            <input type="number" min="0" step="0.1" data-k="personerPrAdresse" data-t="num">
+          </label>
+          <label class="f"><span>Kortbaggrund</span>
+            <select data-k="kort">
+              <option value="lys">Lys (CARTO)</option>
+              <option value="farve">Farver (CARTO Voyager)</option>
+              <option value="mork">Mørk (CARTO)</option>
+              <option value="osm">OpenStreetMap standard</option>
+            </select>
+          </label>
+          <p class="hint">Lad søgeradius stå tom for automatisk valg – så udvides området selv, hvis kurven når kanten. Hentet vejnet gemmes i browseren i 30 dage, så næste beregning i samme område går hurtigt.</p>
+          <div class="knap-raekke"><button class="knap lille" data-act="ryd-cache">Hent vejnettet forfra (ryd mellemlager)</button></div>
+        </div>
+      </details>
+
+      <details class="sek">
+        <summary>Gem og eksportér</summary>
+        <div class="sek-indhold">
+          <p class="hint">Indstillinger gemmes automatisk i denne browser. Brug filerne til at flytte dem til en anden computer eller dele dem med kolleger.</p>
+          <div class="knap-raekke">
+            <button class="knap" data-act="gem-fil">Gem indstillinger som fil</button>
+            <button class="knap" data-act="hent-fil">Indlæs indstillinger</button>
+            <button class="knap" data-act="nulstil">Nulstil alt</button>
+          </div>
+          <div id="nulstilBekraeft" hidden class="hint" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            Slet alle indstillinger og stationer? <button class="knap lille" data-act="nulstil-ja">Ja, nulstil</button> <button class="knap lille" data-act="nulstil-nej">Fortryd</button>
+          </div>
+          <input type="file" id="filInput" accept=".json,application/json" hidden>
+          <div class="hint" style="font-weight:600;color:var(--fg);margin-top:4px">Eksportér kørekurverne</div>
+          <div class="knap-raekke">
+            <button class="knap" data-act="eks-geojson">GeoJSON</button>
+            <button class="knap" data-act="eks-png">PNG-billede</button>
+            <button class="knap" data-act="eks-pdf">PDF-rapport</button>
+          </div>
+          <p class="hint">GeoJSON kan åbnes i QGIS, ArcGIS og de fleste GIS-programmer.</p>
+        </div>
+      </details>
+
+      <details class="sek">
+        <summary>Sådan virker det</summary>
+        <div class="sek-indhold hjaelp">
+          <h3>Kort fortalt</h3>
+          <p>Programmet henter vejene omkring stationen fra OpenStreetMap og regner – ligesom en GPS – den hurtigste vej fra hvert punkt i vejnettet <b>ind til stationen</b>. Kurverne viser, hvor man kan bo og være fremme inden for fx 3, 4 og 5 minutter.</p>
+          <h3>Mødetid</h3>
+          <p>Mødetiden er tid fra alarm til bilen kører + køretid + tid fra parkering til fremmøde. Brandmanden kører i egen bil efter de almindelige færdselsregler: aldrig over hastighedsgrænsen, ensretning og svingforbud overholdes, og der holdes for rødt.</p>
+          <h3>Test en bopæl</h3>
+          <p>Søg en adresse eller klik på kortet. Programmet finder nærmeste vej, regner mødetiden for hvert tidspunkt og tegner ruten. Grøn betyder inden for den længste mødetid, rød betyder over.</p>
+          <h3>Hentning af vejnet</h3>
+          <p>Vejnettet hentes fra OpenStreetMaps gratis servere i felter på ca. 9 × 9 km. Første gang i et område tager det typisk ½–2 minutter, og du kan følge fremdriften nederst i panelet. Felterne gemmes i browseren i 30 dage, så næste beregning går hurtigt. Svarer en server ikke inden for 90 sekunder, prøver programmet automatisk en anden.</p>
+          <h3>Fart på hvert vejstykke</h3>
+          <ul>
+            <li>Udgangspunkt: skiltet hastighed fra OpenStreetMap, ellers "Uden skilt" for vejtypen – ganget med "Kør med %".</li>
+            <li>Trafikken på det valgte tidspunkt sænker farten lidt – mest på motorveje og hurtige landeveje tæt på kapacitetsgrænsen.</li>
+            <li>Vejarbejde trækker yderligere fra. Lukkede veje kan ikke bruges.</li>
+          </ul>
+          <h3>Kryds, ensretning og svingforbud</h3>
+          <p>Ved hvert kryds lægges en grundtid til, plus ventetid fra trafikken på den vigtigste vej i krydset. Ensrettede veje køres kun den rigtige vej, og registrerede svingforbud (fx "forbudt venstresving") overholdes. Bilen laver ikke U-vendinger midt på vejen.</p>
+          <h3>Trafik – Vejdirektoratets model</h3>
+          <p>Trafikken bygger på Vejdirektoratets Håndbog Kapacitet og serviceniveau (2024). Døgnprofilen (figur 10.5) giver trafikken time for time for mandag–torsdag, fredag, lørdag og søn-/helligdag. Ganget med vejens belastning i myldretid giver det en <b>belastningsgrad</b> pr. vejtype.</p>
+          <p>Belastningsgraden bruges to steder. På strækningerne falder farten efter håndbogens hastighedskurver (figur 4.20–4.22), som er næsten flade, indtil vejen nærmer sig kapacitetsgrænsen. I krydsene stiger ventetiden efter håndbogens serviceniveauer (figur 5.4, 6.4 og 7.1). I byen er det derfor krydsene, der koster mest tid i myldretiden.</p>
+          <p>Håndbogens tal gælder almindelige biler – og det er netop, hvad en brandmand på vej til stationen kører i. Derfor får bilen hele forsinkelsen. Vælg derfor også det tidspunkt, hvor I oftest bliver alarmeret, eller det værste, fx hverdag kl. 16:30.</p>
+          <h3>Areal, afstand og adresser</h3>
+          <p>Arealet beregnes direkte af kurverne. "Som cirkel" er radius i en cirkel med samme areal – en typisk afstand. "Længst væk" er det fjerneste punkt inden for kurven i luftlinje. Adresser tælles ud fra OpenStreetMap (i Danmark er de officielle adresser indlæst). Indbyggere er et <b>skøn</b>: antal adresser × personer pr. adresse. Erhvervsadresser tæller med, så brug tallet med omtanke.</p>
+          <h3>Begrænsninger</h3>
+          <ul>
+            <li>Resultatet er aldrig bedre end vejdata i OpenStreetMap.</li>
+            <li>Svingforbud via et helt vejstykke (ikke et punkt) indgår ikke.</li>
+            <li>Bopælen kobles til nærmeste vej. Lange private indkørsler og gårdspladser er ikke med.</li>
+            <li>Ventetiden ved rødt er et gennemsnit – den enkelte tur kan være hurtigere eller langsommere.</li>
+          </ul>
+        </div>
+      </details>
+    </div>
+
+    <div class="side-fod">
+      <button class="beregn" id="beregnKnap">Beregn mødetid</button>
+      <button class="knap" id="stopKnap" hidden>Afbryd</button>
+      <div class="status" id="status" role="status" aria-live="polite">Klar. Tryk "Beregn mødetid" for at hente vejnettet og regne.</div>
+    </div>
+  </aside>
+
+  <!-- ================= KORT OG RESULTATER ================= -->
+  <main class="hoved">
+    <div class="kortomr" id="kortomr">
+      <div class="kort" id="kortA"></div>
+      <div class="kort" id="kortB" hidden></div>
+      <div class="kortbanner" id="banner" hidden></div>
+    </div>
+    <section class="resultater" id="resultater">
+      <div class="res-top">
+        <h2>Resultater</h2>
+        <button class="knap lille" data-act="tael-adresser" id="taelKnap" disabled>Tæl adresser (bopæle)</button>
+      </div>
+      <div id="resIndhold"><div class="tom">Ingen beregning endnu. Eksemplet viser en station i Odense – flyt den, eller søg din egen station frem, og tryk Beregn mødetid.</div></div>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+'use strict';
+/* ======================================================================
+   DEL 1 – BEREGNINGSMOTOREN
+   Denne del regner. Den rører ikke ved skærmen, så den kan testes for sig.
+   ====================================================================== */
+/* CORE-START */
+
+// Vejtyperne, som brugeren kan sætte hastigheder for. Rækkefølgen bruges som nummer (0–3).
+const VEJTYPER = ['motorvej', 'landevej', 'byvej', 'villavej'];
+const VEJTYPE_NAVN = { motorvej: 'Motorvej', landevej: 'Landevej', byvej: 'Byvej', villavej: 'Villavej' };
+const DAGE = { mantor: 'Mandag–torsdag', fredag: 'Fredag', lordag: 'Lørdag', sondag: 'Søndag/helligdag' };
+const UOPNAAET = 1e6; // værdi for "kan ikke nås"
+const AFGANG_MIN = 1, AFGANG_MAX = 7; // tilladte afgangstider (minutter)
+// Sikrer at en afgangstid ligger mellem 1 og 7 minutter
+function afgangstid(v) { v = Number(v); if (!isFinite(v)) v = AFGANG_MIN; return Math.min(AFGANG_MAX, Math.max(AFGANG_MIN, v)); }
+
+// Afstand i meter mellem to punkter (præcis nok på de afstande, vi arbejder med).
+function afstand(lat1, lon1, lat2, lon2) {
+  const r = Math.PI / 180;
+  const x = (lon2 - lon1) * r * Math.cos((lat1 + lat2) / 2 * r);
+  const y = (lat2 - lat1) * r;
+  return Math.sqrt(x * x + y * y) * 6371000;
+}
+
+// Læser OpenStreetMaps "maxspeed"-mærke og giver km/t (0 = ukendt).
+function laesHastighed(v) {
+  if (!v) return 0;
+  v = String(v).trim();
+  const navngivne = { 'DK:urban': 50, 'DK:rural': 80, 'DK:motorway': 130, 'DK:living_street': 15, 'none': 130, 'walk': 7 };
+  if (navngivne[v]) return navngivne[v];
+  const m = v.match(/^(\d+(?:\.\d+)?)\s*(mph)?/);
+  if (!m) return 0;
+  return m[2] ? Number(m[1]) * 1.609 : Number(m[1]);
+}
+
+// Placerer en OSM-vej i en af de fire vejtyper (nummer 0–3).
+function klassificer(highway, grænse) {
+  const h = highway.replace(/_link$/, '');
+  if (h === 'motorway') return 0;
+  if (h === 'trunk' || h === 'primary' || h === 'secondary') return (grænse > 0 && grænse <= 60) ? 2 : 1;
+  if (h === 'tertiary' || h === 'unclassified') return grænse > 60 ? 1 : 2;
+  return 3; // residential, living_street, service
+}
+
+/* Bygger et vejnet ("graf") ud fra svaret fra Overpass.
+   Hver vej deles i små stykker mellem to OSM-punkter. Hvert stykke findes i begge
+   retninger; kørsel mod ensretning markeres, så den kan forbydes. */
+function byggGraf(data) {
+  const knudeIndeks = new Map(), lat = [], lon = [];
+  const vejKlasse = [], vejGraense = [], vejRund = [], vejOsm = [];
+  const sFra = [], sTil = [], sLaengde = [], sVej = [], sMod = [];
+  const signalIds = new Set(), forbud = [];
+  const vejIdxFraOsm = new Map();
+
+  for (const el of data.elements) {
+    if (el.type === 'node') signalIds.add(el.id);           // kun lyskryds hentes som punkter
+    else if (el.type === 'relation') forbud.push(el);         // svingforbud
+  }
+  for (const el of data.elements) {
+    if (el.type !== 'way' || !el.nodes || !el.geometry) continue;
+    const t = el.tags || {};
+    const hw = t.highway; if (!hw) continue;
+    let grænse = laesHastighed(t.maxspeed);
+    if (!grænse && hw === 'living_street') grænse = 15;
+    const rund = (t.junction === 'roundabout' || t.junction === 'circular') ? 1 : 0;
+    // Ensretning
+    let frem = true, tilbage = true;
+    const ow = t.oneway;
+    if (ow === 'yes' || ow === '1' || ow === 'true') tilbage = false;
+    else if (ow === '-1' || ow === 'reverse') frem = false;
+    else if (ow !== 'no' && (rund || hw === 'motorway')) tilbage = false;
+
+    const vi = vejKlasse.length;
+    vejKlasse.push(klassificer(hw, grænse)); vejGraense.push(grænse); vejRund.push(rund); vejOsm.push(el.id);
+    vejIdxFraOsm.set(el.id, vi);
+
+    const idx = el.nodes.map((id, i) => {
+      let k = knudeIndeks.get(id);
+      if (k === undefined) {
+        k = lat.length; knudeIndeks.set(id, k);
+        const g = el.geometry[i];
+        lat.push(g ? g.lat : NaN); lon.push(g ? g.lon : NaN);
+      }
+      return k;
+    });
+    for (let i = 0; i < idx.length - 1; i++) {
+      const a = idx[i], b = idx[i + 1];
+      if (a === b) continue;
+      const l = afstand(lat[a], lon[a], lat[b], lon[b]);
+      if (!isFinite(l)) continue;
+      // Stykkerne lægges altid parvis: lige nummer = fremad, næste nummer = baglæns.
+      sFra.push(a); sTil.push(b); sLaengde.push(l); sVej.push(vi); sMod.push(frem ? 0 : 1);
+      sFra.push(b); sTil.push(a); sLaengde.push(l); sVej.push(vi); sMod.push(tilbage ? 0 : 1);
+    }
+  }
+  const nK = lat.length, nS = sFra.length;
+  // Opslagstabel: hvilke vejstykker starter i hvert punkt
+  const udStart = new Int32Array(nK + 1);
+  for (let s = 0; s < nS; s++) udStart[sFra[s] + 1]++;
+  for (let k = 0; k < nK; k++) udStart[k + 1] += udStart[k];
+  const udListe = new Int32Array(nS), fyld = udStart.slice(0, nK);
+  for (let s = 0; s < nS; s++) udListe[fyld[sFra[s]]++] = s;
+
+  const knudeSignal = new Uint8Array(nK);
+  // Den vigtigste vejtype i hvert punkt (0 = motorvej … 3 = villavej) – bruges til vigepligt og trafik i kryds
+  const knudeMinKlasse = new Uint8Array(nK).fill(3);
+  for (let s = 0; s < nS; s++) { const k = sFra[s], c = vejKlasse[sVej[s]]; if (c < knudeMinKlasse[k]) knudeMinKlasse[k] = c; }
+  for (const [id, k] of knudeIndeks) if (signalIds.has(id)) knudeSignal[k] = 1;
+
+  // Svingforbud: "fra vej X gennem punkt P må man ikke (eller kun) køre ind på vej Y"
+  const forbudKort = new Map(), knudeForbud = new Uint8Array(nK);
+  for (const r of forbud) {
+    const t = r.tags || {};
+    const type = t.restriction || t['restriction:motorcar'] || t['restriction:hgv'];
+    if (!type || !r.members) continue;
+    if (t.except && /emergency/.test(t.except)) continue;
+    const fra = r.members.find(m => m.role === 'from' && m.type === 'way');
+    const via = r.members.find(m => m.role === 'via');
+    const til = r.members.find(m => m.role === 'to' && m.type === 'way');
+    if (!fra || !via || !til || via.type !== 'node') continue;
+    const fi = vejIdxFraOsm.get(fra.ref), ti = vejIdxFraOsm.get(til.ref), vk = knudeIndeks.get(via.ref);
+    if (fi === undefined || ti === undefined || vk === undefined) continue;
+    const nøgle = fi + '|' + vk;
+    let e = forbudKort.get(nøgle);
+    if (!e) { e = { kun: -1, ikke: new Set() }; forbudKort.set(nøgle, e); }
+    if (type.startsWith('only_')) e.kun = ti; else if (type.startsWith('no_')) e.ikke.add(ti);
+    knudeForbud[vk] = 1;
+  }
+
+  return {
+    nK, nS,
+    lat: Float64Array.from(lat), lon: Float64Array.from(lon),
+    sFra: Int32Array.from(sFra), sTil: Int32Array.from(sTil), sLaengde: Float32Array.from(sLaengde),
+    sVej: Int32Array.from(sVej), sMod: Uint8Array.from(sMod),
+    vejKlasse: Uint8Array.from(vejKlasse), vejGraense: Float32Array.from(vejGraense), vejRund: Uint8Array.from(vejRund),
+    udStart, udListe, knudeSignal, knudeMinKlasse, forbudKort, knudeForbud,
+    antalVeje: vejKlasse.length
+  };
+}
+
+/* ---------- TRAFIKMODEL ----------
+   Bygger på Vejdirektoratets "Håndbog Kapacitet og serviceniveau" (marts 2024):
+   - Trafikkens fordeling over døgnet:   figur 10.5 (bolig-arbejdsstedstrafik, fire dagtyper)
+   - Fart på strækninger ved trafik:      figur 4.20–4.22 (hastighed som funktion af belastningsgrad)
+   - Ventetid i kryds ved trafik:         figur 5.4, 6.4 og 7.1 (middelforsinkelse pr. serviceniveau)
+   Håndbogens tal gælder almindelige biler. En brandbil under udrykning får kun en del af
+   forsinkelsen, fordi trafikken viger ("andel ved udrykning"). */
+
+// Timetrafik (køretøjer, begge retninger) aflæst fra figur 10.5 – én værdi pr. time: kl. 0–1, 1–2, …, 23–24
+const DOEGNPROFIL = {
+  mantor: [230, 150, 90, 60, 90, 350, 1000, 1550, 1350, 1100, 1050, 1100, 1150, 1250, 1450, 1700, 1800, 1600, 1150, 850, 650, 550, 400, 250],
+  fredag: [250, 160, 100, 60, 90, 330, 900, 1450, 1200, 1050, 1050, 1150, 1250, 1450, 1700, 1750, 1650, 1350, 1000, 750, 600, 550, 500, 350],
+  lordag: [300, 200, 130, 80, 60, 80, 200, 350, 500, 750, 1000, 1150, 1250, 1200, 1150, 1100, 1050, 950, 800, 650, 600, 550, 500, 400],
+  sondag: [300, 220, 150, 90, 60, 60, 120, 200, 300, 550, 900, 1050, 1100, 1150, 1200, 1200, 1150, 1050, 850, 700, 550, 450, 300, 180]
+};
+const PROFIL_TOP = Math.max(...DOEGNPROFIL.mantor);
+
+function tilMinutter(hhmm) { const [h, m] = String(hhmm || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); }
+
+// Trafikniveau på et tidspunkt: 1 = hverdagens travleste time, 0 = ingen trafik
+function trafikNiveau(dag, tid) {
+  const p = DOEGNPROFIL[dag] || DOEGNPROFIL.mantor;
+  const t = tilMinutter(tid) / 60 - 0.5;             // timeværdien gælder midt i timen
+  const i = Math.floor(t), f = t - i;
+  const a = p[(i + 24) % 24], b = p[(i + 25) % 24];
+  return (a + f * (b - a)) / PROFIL_TOP;
+}
+
+// Andel af farten, almindelig trafik mister ved belastningsgrad B (figur 4.20–4.22).
+// Kurverne er flade ved lav belastning og falder først tæt på kapacitetsgrænsen (B = 1).
+// Jo højere fri hastighed, jo større fald: 2-sporet vej 100 km/t → ca. 65, 80 → ca. 62, 60 → ca. 57.
+function fartTab(klasse, vFri, B) {
+  B = Math.min(Math.max(B, 0), 1);
+  if (klasse === 0) return 0.30 * Math.pow(B, 5.5);  // motorvej / 4 spor: ca. −30 % ved B = 1
+  const a = Math.min(0.38, Math.max(0.03, (vFri - 55) / 125));
+  return a * Math.pow(B, 3.5);
+}
+
+// Middelforsinkelse (sek.) for almindelige biler i et kryds ved belastningsgrad B.
+// Tilpasset håndbogens serviceniveauer: lav belastning ≈ A (≤ 10 sek.), høj belastning ≈ D–E.
+function krydsTrafik(type, B) {
+  B = Math.min(Math.max(B, 0), 1);
+  if (type === 'signal') return 30 * B / (1 - 0.55 * B);      // B 0,5 ≈ 27 sek. · B 0,85 ≈ 48 sek.
+  if (type === 'rundkorsel') return 14 * B / (1 - 0.6 * B);   // B 0,5 ≈ 10 sek. · B 0,85 ≈ 24 sek.
+  return 6 * B / (1 - 0.6 * B);                                // vigepligt: B 0,5 ≈ 4 sek. · B 0,85 ≈ 10 sek.
+}
+
+// Samler trafikken for et scenarie: belastningsgrad pr. vejtype og hvor meget brandbilen påvirkes
+function trafikTilstand(S, dag, tid) {
+  const niveau = trafikNiveau(dag, tid);
+  const B = {};
+  for (const v of VEJTYPER) B[v] = Math.min(1, niveau * Number(S.trafik.spids[v] ?? 0));
+  const andel = S.udrykning ? Math.min(1, Math.max(0, Number(S.trafik.andelUdrykning ?? 50) / 100)) : 1;
+  return { niveau, B, andel, navn: `${Math.round(niveau * 100)} % af hverdagens myldretid` };
+}
+
+/* Beregner køretiden (minutter) for hvert vejstykke i det valgte scenarie.
+   Uendelig tid = vejstykket kan ikke bruges. */
+function segmentTider(G, S, T) {
+  // Først farten for hver vej
+  const vejFart = new Float32Array(G.antalVeje);
+  for (let w = 0; w < G.antalVeje; w++) {
+    const navn = VEJTYPER[G.vejKlasse[w]], vt = S.vej[navn];
+    const grænse = (S.brugOsmHastighed && G.vejGraense[w] > 0) ? G.vejGraense[w] : vt.normal;
+    // Almindelige færdselsregler: aldrig over hastighedsgrænsen
+    let v = grænse * Math.min(100, Math.max(10, Number(S.fartPct) || 100)) / 100;
+    v *= 1 - T.andel * fartTab(G.vejKlasse[w], grænse, T.B[navn]);   // trafikkens påvirkning
+    vejFart[w] = Math.max(v, 3);
+  }
+  const tid = new Float32Array(G.nS);
+  for (let s = 0; s < G.nS; s++) {
+    const w = G.sVej[s];
+    let t = G.sLaengde[s] / 1000 / vejFart[w] * 60;
+    if (G.sMod[s]) t = (S.modEnsretning && G.vejKlasse[w] >= 2) ? t * 2 : Infinity;
+    tid[s] = t;
+  }
+  // Spærringer og vejarbejde
+  const ky = 110574;
+  for (const sp of (S.sparringer || [])) {
+    const kx = 111320 * Math.cos(sp.lat * Math.PI / 180), r = sp.radius || 30;
+    const dLat = (r + 200) / ky, dLon = (r + 200) / kx;
+    for (let s = 0; s < G.nS; s++) {
+      const a = G.sFra[s], b = G.sTil[s];
+      if (Math.abs(G.lat[a] - sp.lat) > dLat && Math.abs(G.lat[b] - sp.lat) > dLat) continue;
+      if (Math.abs(G.lon[a] - sp.lon) > dLon && Math.abs(G.lon[b] - sp.lon) > dLon) continue;
+      // Korteste afstand fra spærringens midte til vejstykket
+      const ax = (G.lon[a] - sp.lon) * kx, ay = (G.lat[a] - sp.lat) * ky;
+      const bx = (G.lon[b] - sp.lon) * kx, by = (G.lat[b] - sp.lat) * ky;
+      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+      let f = l2 > 0 ? -(ax * dx + ay * dy) / l2 : 0; f = Math.max(0, Math.min(1, f));
+      const px = ax + f * dx, py = ay + f * dy;
+      if (Math.sqrt(px * px + py * py) > r) continue;
+      if (sp.type === 'lukket') tid[s] = Infinity;
+      else tid[s] = tid[s] / Math.max(0.05, 1 - (sp.fald || 50) / 100);
+    }
+  }
+  return tid;
+}
+
+// En lille "prioritetskø" – holder styr på, hvilket vejstykke der skal undersøges næst.
+class MinHeap {
+  constructor() { this.k = []; this.v = []; }
+  get size() { return this.k.length; }
+  topNoegle() { return this.k[0]; }
+  push(key, val) {
+    const k = this.k, v = this.v; let i = k.length; k.push(key); v.push(val);
+    while (i > 0) { const p = (i - 1) >> 1; if (k[p] <= key) break; k[i] = k[p]; v[i] = v[p]; i = p; }
+    k[i] = key; v[i] = val;
+  }
+  pop() {
+    const k = this.k, v = this.v, top = v[0], lk = k.pop(), lv = v.pop(), n = k.length;
+    if (n > 0) {
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1; if (l >= n) break;
+        const r = l + 1, m = (r < n && k[r] < k[l]) ? r : l;
+        if (k[m] >= lk) break;
+        k[i] = k[m]; v[i] = v[m]; i = m;
+      }
+      k[i] = lk; v[i] = lv;
+    }
+    return top;
+  }
+}
+
+/* Hurtigste vej (Dijkstras algoritme, "GPS-princippet").
+   Vi regner på vejstykker i stedet for punkter, så vi kan vide, hvilken vej brandbilen
+   kommer fra i et kryds – det er nødvendigt for svingforbud og U-vendinger.
+   Hver station starter med sin egen afgangstid (tid fra alarm til bilen kører ud).
+   Resultat: for hvert vejstykke den tid (min) fra alarm, hvor brandbilen er nået til enden af det. */
+function korDijkstra(G, kilder, tid, S, T, maxT) {
+  const dist = new Float64Array(G.nS).fill(Infinity);
+  const knudeT = new Float64Array(G.nK).fill(Infinity);
+  // Ventetid i kryds (minutter) = brandbilens grundtid + andel af trafikkens ventetid.
+  // Trafikken måles på den vigtigste vej i krydset.
+  const g = S.krydsGrund || { signal: 5, rundkorsel: 6, kryds: 3 };
+  const fSignal = VEJTYPER.map(v => (g.signal + T.andel * krydsTrafik('signal', T.B[v])) / 60);
+  const fRund = VEJTYPER.map(v => (g.rundkorsel + T.andel * krydsTrafik('rundkorsel', T.B[v])) / 60);
+  const fVige = VEJTYPER.map(v => (g.kryds + T.andel * krydsTrafik('vige', T.B[v])) / 60);
+  const fPassage = g.kryds * 0.5 / 60;                 // kryds på vej med forkørselsret
+  const kø = new MinHeap();
+  for (const kilde of kilder) {
+    const k = kilde.idx, start = kilde.start;
+    knudeT[k] = Math.min(knudeT[k], start);
+    for (let i = G.udStart[k]; i < G.udStart[k + 1]; i++) {
+      const t = G.udListe[i], d = start + tid[t];
+      if (d < dist[t]) { dist[t] = d; kø.push(d, t); }
+    }
+  }
+  while (kø.size) {
+    const d = kø.topNoegle(), s = kø.pop();
+    if (d > dist[s]) continue;      // gammel post i køen
+    if (d > maxT) break;            // resten er længere væk end vi skal bruge
+    const v = G.sTil[s], ws = G.sVej[s];
+    if (d < knudeT[v]) knudeT[v] = d;
+    const r = G.knudeForbud[v] ? G.forbudKort.get(ws + '|' + v) : null;
+    const o0 = G.udStart[v], o1 = G.udStart[v + 1], grad = o1 - o0;
+    for (let i = o0; i < o1; i++) {
+      const t = G.udListe[i], tt = tid[t];
+      if (tt === Infinity) continue;
+      if (t === (s ^ 1) && grad > 1) continue;            // ingen U-vending (undtagen blinde veje)
+      const wt = G.sVej[t];
+      if (r) { if (r.kun >= 0 && wt !== r.kun) continue; if (r.ikke.has(wt)) continue; }
+      const ct = G.vejKlasse[wt], cs = G.vejKlasse[ws], mk = G.knudeMinKlasse[v];
+      let forsink = 0;
+      if (G.knudeSignal[v]) forsink = fSignal[mk];
+      else if (G.vejRund[wt] && !G.vejRund[ws]) forsink = fRund[mk];
+      else if (grad >= 3 && ct !== 0 && !(G.vejRund[wt] && G.vejRund[ws])) {
+        // Kommer brandbilen fra en mindre vej end den vigtigste i krydset, har den vigepligt
+        forsink = mk < cs ? fVige[mk] : fPassage;
+      }
+      const nd = d + forsink + tt;
+      if (nd < dist[t]) { dist[t] = nd; kø.push(nd, t); }
+    }
+  }
+  return { dist, knudeT };
+}
+
+/* Den omvendte vej: fra alle punkter IND til stationen (mål).
+   Hvert vejstykke får den tid, det tager fra vejstykkets start og frem til stationen.
+   Samme regler som ovenfor – ensretning, svingforbud, ingen U-vendinger og tid i kryds –
+   men set baglæns. "nxt" husker det næste vejstykke på den hurtigste rute (til at tegne ruter). */
+function korDijkstraTil(G, maal, tid, S, T, maxT) {
+  if (!G.indStart) { // liste over vejstykker, der ender i hvert punkt (bygges én gang)
+    const st = new Int32Array(G.nK + 1);
+    for (let s = 0; s < G.nS; s++) st[G.sTil[s] + 1]++;
+    for (let k = 0; k < G.nK; k++) st[k + 1] += st[k];
+    const li = new Int32Array(G.nS), fy = st.slice(0, G.nK);
+    for (let s = 0; s < G.nS; s++) li[fy[G.sTil[s]]++] = s;
+    G.indStart = st; G.indListe = li;
+  }
+  const dist = new Float64Array(G.nS).fill(Infinity);
+  const knudeT = new Float64Array(G.nK).fill(Infinity);
+  const nxt = new Int32Array(G.nS).fill(-1);
+  const g = S.krydsGrund || { signal: 12, rundkorsel: 5, kryds: 4 };
+  const fSignal = VEJTYPER.map(v => (g.signal + T.andel * krydsTrafik('signal', T.B[v])) / 60);
+  const fRund = VEJTYPER.map(v => (g.rundkorsel + T.andel * krydsTrafik('rundkorsel', T.B[v])) / 60);
+  const fVige = VEJTYPER.map(v => (g.kryds + T.andel * krydsTrafik('vige', T.B[v])) / 60);
+  const fPassage = g.kryds * 0.5 / 60;
+  const kø = new MinHeap();
+  for (const m of maal) {
+    knudeT[m.idx] = Math.min(knudeT[m.idx], m.start);
+    for (let i = G.indStart[m.idx]; i < G.indStart[m.idx + 1]; i++) {
+      const p = G.indListe[i], d = m.start + tid[p];
+      if (d < dist[p]) { dist[p] = d; kø.push(d, p); }
+    }
+  }
+  while (kø.size) {
+    const d = kø.topNoegle(), s = kø.pop();
+    if (d > dist[s]) continue;
+    if (d > maxT) break;
+    const u = G.sFra[s], wt = G.sVej[s], ct = G.vejKlasse[wt];
+    if (d < knudeT[u]) knudeT[u] = d;                    // fra punktet u er der d minutter til stationen
+    const grad = G.udStart[u + 1] - G.udStart[u], mk = G.knudeMinKlasse[u];
+    for (let i = G.indStart[u]; i < G.indStart[u + 1]; i++) {
+      const p = G.indListe[i], tp = tid[p];               // vejstykke p kører ind i u, derefter s
+      if (tp === Infinity) continue;
+      if (s === (p ^ 1) && grad > 1) continue;             // ingen U-vending
+      const ws = G.sVej[p];
+      if (G.knudeForbud[u]) { const r = G.forbudKort.get(ws + '|' + u); if (r) { if (r.kun >= 0 && wt !== r.kun) continue; if (r.ikke.has(wt)) continue; } }
+      const cs = G.vejKlasse[ws];
+      let forsink = 0;
+      if (G.knudeSignal[u]) forsink = fSignal[mk];
+      else if (G.vejRund[wt] && !G.vejRund[ws]) forsink = fRund[mk];
+      else if (grad >= 3 && ct !== 0 && !(G.vejRund[wt] && G.vejRund[ws])) forsink = mk < cs ? fVige[mk] : fPassage;
+      const nd = d + forsink + tp;
+      if (nd < dist[p]) { dist[p] = nd; nxt[p] = s; kø.push(nd, p); }
+    }
+  }
+  return { dist, knudeT, nxt, omvendt: true };
+}
+
+// Finder det vejpunkt, der ligger nærmest et sted (ikke på motorvejen).
+function naermesteKnude(G, lat, lon) {
+  let bedst = -1, bd = Infinity;
+  for (let k = 0; k < G.nK; k++) {
+    if (G.udStart[k + 1] === G.udStart[k]) continue;
+    let brugbar = false;
+    for (let i = G.udStart[k]; i < G.udStart[k + 1]; i++) {
+      const s = G.udListe[i];
+      if (!G.sMod[s] && G.vejKlasse[G.sVej[s]] !== 0) { brugbar = true; break; }
+    }
+    if (!brugbar) continue;
+    const d = afstand(lat, lon, G.lat[k], G.lon[k]);
+    if (d < bd) { bd = d; bedst = k; }
+  }
+  return { idx: bedst, afstand: bd };
+}
+
+/* Lægger et net af små felter (fx 100 × 100 m) over området. Hvert felt får den korteste
+   køretid fra en nåelig vej inden for "vejbuffer" meter. Ud fra nettet tegnes kurverne. */
+function byggGitter(G, res, tid, S, maxT) {
+  const { dist } = res;
+  const buf = Number(S.beregning.vejbuffer) || 150;
+  let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity, n = 0;
+  for (let s = 0; s < G.nS; s++) {
+    const d = dist[s]; if (!isFinite(d) || (res.omvendt ? d - tid[s] : d - tid[s]) > maxT) continue;
+    for (let e = 0; e < 2; e++) {
+      const k = e ? G.sTil[s] : G.sFra[s], la = G.lat[k], lo = G.lon[k];
+      if (la < minLat) minLat = la; if (la > maxLat) maxLat = la;
+      if (lo < minLon) minLon = lo; if (lo > maxLon) maxLon = lo;
+    }
+    n++;
+  }
+  if (!n) return null;
+  const lat0 = (minLat + maxLat) / 2, ky = 110574, kx = 111320 * Math.cos(lat0 * Math.PI / 180);
+  const udX = (maxLon - minLon) * kx, udY = (maxLat - minLat) * ky;
+  const celle = Math.max(Number(S.beregning.celle) || 100, Math.max(udX, udY) / 420);
+  const kant = buf + 3 * celle;
+  const originLon = minLon - kant / kx, originLat = minLat - kant / ky;
+  const nx = Math.ceil((udX + 2 * kant) / celle) + 1, ny = Math.ceil((udY + 2 * kant) / celle) + 1;
+  const val = new Float32Array(nx * ny).fill(UOPNAAET);
+  const rr = buf / celle, rc = Math.ceil(rr), off = [];
+  for (let dy = -rc; dy <= rc; dy++) for (let dx = -rc; dx <= rc; dx++) if (dx * dx + dy * dy <= (rr + 0.5) * (rr + 0.5)) off.push(dx, dy);
+  const trin = celle * 0.5;
+  for (let s = 0; s < G.nS; s++) {
+    const d = dist[s]; if (!isFinite(d)) continue;
+    const tt = tid[s];
+    // Tid i vejstykkets start (t0) og slut (t1). Omvendt: tiden falder hen mod stationen.
+    const t0 = res.omvendt ? d : d - tt, t1 = res.omvendt ? d - tt : d;
+    if (Math.min(t0, t1) > maxT) continue;
+    const a = G.sFra[s], b = G.sTil[s];
+    const m = Math.max(1, Math.ceil(G.sLaengde[s] / trin));
+    for (let j = 0; j <= m; j++) {
+      const f = j / m, tm = t0 + f * (t1 - t0);
+      if (tm > maxT) continue;
+      const la = G.lat[a] + f * (G.lat[b] - G.lat[a]), lo = G.lon[a] + f * (G.lon[b] - G.lon[a]);
+      const gx = Math.round((lo - originLon) * kx / celle), gy = Math.round((la - originLat) * ky / celle);
+      for (let q = 0; q < off.length; q += 2) {
+        const ix = gx + off[q], iy = gy + off[q + 1];
+        if (ix < 0 || iy < 0 || ix >= nx || iy >= ny) continue;
+        const i = iy * nx + ix;
+        if (tm < val[i]) val[i] = tm;
+      }
+    }
+  }
+  return { val, nx, ny, celle, originLat, originLon, kx, ky };
+}
+
+// Køretid i et bestemt punkt (bruges til at tælle adresser).
+function tidVedPunkt(gr, lat, lon) {
+  const ix = Math.round((lon - gr.originLon) * gr.kx / gr.celle), iy = Math.round((lat - gr.originLat) * gr.ky / gr.celle);
+  if (ix < 0 || iy < 0 || ix >= gr.nx || iy >= gr.ny) return UOPNAAET;
+  return gr.val[iy * gr.nx + ix];
+}
+
+/* Tegner kurverne ud fra feltnettet (Turf "isobands").
+   kumulativ[i] = alt inden for tider[i] minutter.  baand[i] = ringen mellem to tider (til farvelægning). */
+function lavKurver(gr, tider) {
+  const { val, nx, ny, celle, originLat, originLon, kx, ky } = gr;
+  const pts = new Array(nx * ny);
+  for (let iy = 0; iy < ny; iy++) {
+    const la = originLat + iy * celle / ky;
+    for (let ix = 0; ix < nx; ix++) {
+      const v = val[iy * nx + ix];
+      pts[iy * nx + ix] = { type: 'Feature', properties: { t: v }, geometry: { type: 'Point', coordinates: [originLon + ix * celle / kx, la] } };
+    }
+  }
+  const fc = { type: 'FeatureCollection', features: pts };
+  const tol = 0.3 * celle / 111320;
+  const forenkl = f => {
+    if (!f || !f.geometry || !f.geometry.coordinates.length) return null;
+    try { return turf.simplify(f, { tolerance: tol, highQuality: false }); } catch (e) { return f; }
+  };
+  const kumulativ = tider.map(t => forenkl(turf.isobands(fc, [-1, t], { zProperty: 't' }).features[0]));
+  const baand = turf.isobands(fc, [-1, ...tider], { zProperty: 't' }).features.map(forenkl);
+  return { kumulativ, baand };
+}
+/* CORE-END */
+
+
+/* ======================================================================
+   DEL 2 – INDSTILLINGER (standardværdier, gem og hent)
+   ====================================================================== */
+const GEM_NOEGLE = 'modetid-indstillinger-v1';
+const uid = () => Math.random().toString(36).slice(2, 9);
+
+function standardIndstillinger() {
+  return {
+    stationer: [{ id: uid(), navn: 'Eksempel – Odense centrum', lat: 55.3959, lon: 10.3883, aktiv: true, afgang: 2 }],
+    tider: [3, 4, 5],
+    klar: 1,          // min fra alarm til bilen kører
+    parkering: 0.5,   // min fra parkering til fremmøde på stationen
+    fartPct: 100,     // % af hastighedsgrænsen
+    bopaele: [],      // testede adresser
+    scenA: { dag: 'mantor', tid: '16:30' },
+    sammenlign: true,
+    scenB: { dag: 'sondag', tid: '03:00' },
+    visning: 'overlay',
+    vej: {
+      motorvej: { normal: 110, over: 0, max: 130 },
+      landevej: { normal: 80, over: 0, max: 90 },
+      byvej: { normal: 50, over: 0, max: 60 },
+      villavej: { normal: 40, over: 0, max: 50 }
+    },
+    brugOsmHastighed: true,
+    udrykning: false, // fast: almindelige færdselsregler
+    modEnsretning: false,
+    krydsGrund: { signal: 12, rundkorsel: 5, kryds: 4 },  // sek. for almindelig bil uden anden trafik
+    trafik: {
+      spids: { motorvej: 0.8, landevej: 0.55, byvej: 0.75, villavej: 0.3 }, // belastningsgrad i hverdagens travleste time
+      andelUdrykning: 50                                                      // % af trafikkens forsinkelse, brandbilen får
+    },
+    sparringer: [],
+    beregning: { radiusKm: null, celle: 100, vejbuffer: 150, servicevej: false },
+    personerPrAdresse: 2.1,
+    kort: 'lys'
+  };
+}
+// Fletter gemte indstillinger ind i standardværdierne, så nye felter altid findes.
+function flet(std, gemt) {
+  if (Array.isArray(std)) return Array.isArray(gemt) ? gemt : std;
+  if (std && typeof std === 'object') {
+    const ud = { ...std };
+    if (gemt && typeof gemt === 'object') for (const k of Object.keys(gemt)) ud[k] = (k in std) ? flet(std[k], gemt[k]) : gemt[k];
+    return ud;
+  }
+  return gemt === undefined ? std : gemt;
+}
+function hentIndstillinger() {
+  try { const t = localStorage.getItem(GEM_NOEGLE); if (t) return retAfgang(flet(standardIndstillinger(), JSON.parse(t))); } catch (e) {}
+  return standardIndstillinger();
+}
+// Ældre indstillinger havde én fælles afmarchtid – nu har hver station sin egen afgangstid
+function retAfgang(x) {
+  for (const s of x.stationer) s.afgang = afgangstid(s.afgang ?? x.afmarch ?? 2);
+  delete x.afmarch;
+  // Fra ældre versioner: "hverdag" blev til mandag–torsdag, og de manuelle tidsrum er erstattet af trafikmodellen
+  for (const sc of [x.scenA, x.scenB]) if (sc && !DAGE[sc.dag]) sc.dag = 'mantor';
+  delete x.perioder; delete x.forsinkelse;
+  x.udrykning = false; x.modEnsretning = false;  // denne app følger altid færdselsreglerne
+  return x;
+}
+function gem() { try { localStorage.setItem(GEM_NOEGLE, JSON.stringify(S)); } catch (e) {} }
+
+let S = hentIndstillinger();
+
+
+/* ======================================================================
+   DEL 3 – KORTET (Leaflet)
+   ====================================================================== */
+const KORTLAG = {
+  lys:   { url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', sub: 'abcd', retina: true, attr: '© OpenStreetMap-bidragydere © CARTO' },
+  farve: { url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', sub: 'abcd', retina: true, attr: '© OpenStreetMap-bidragydere © CARTO' },
+  mork:  { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', sub: 'abcd', retina: true, attr: '© OpenStreetMap-bidragydere © CARTO' },
+  osm:   { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', sub: '', retina: false, attr: '© OpenStreetMap-bidragydere' }
+};
+// Farver til kurverne: grøn (hurtigt) → rød/lilla (langt væk)
+const FARVER = [
+  { fyld: '#1b9e5a', streg: '#0d6b3a' }, { fyld: '#7cc25a', streg: '#467f22' }, { fyld: '#f2c230', streg: '#a87b00' },
+  { fyld: '#f08a3c', streg: '#b05010' }, { fyld: '#d7352b', streg: '#94140d' }, { fyld: '#8e3a9e', streg: '#5c1d6b' }
+];
+
+function lavKort(id) {
+  const m = L.map(id, { zoomSnap: 1, preferCanvas: true, zoomControl: true }).setView([S.stationer[0]?.lat || 55.68, S.stationer[0]?.lon || 11.0], 11);
+  m.lag = {
+    baggrund: null,
+    baand: L.layerGroup().addTo(m),
+    streg: L.layerGroup().addTo(m),
+    sparr: L.layerGroup().addTo(m),
+    rute: L.layerGroup().addTo(m),
+    bopael: L.layerGroup().addTo(m),
+    stationer: L.layerGroup().addTo(m)
+  };
+  return m;
+}
+const kortA = lavKort('kortA');
+const kortB = lavKort('kortB');
+
+function saetBaggrund() {
+  const k = KORTLAG[S.kort] || KORTLAG.lys;
+  for (const m of [kortA, kortB]) {
+    if (m.lag.baggrund) m.removeLayer(m.lag.baggrund);
+    m.lag.baggrund = L.tileLayer(k.url, { subdomains: k.sub || 'abc', attribution: k.attr, maxZoom: 19, crossOrigin: true, detectRetina: false }).addTo(m);
+    m.lag.baggrund.bringToBack();
+  }
+}
+
+// Holder de to kort i takt, når de vises side om side
+let synkroniserer = false;
+function synk(fra, til) {
+  fra.on('move', () => {
+    if (synkroniserer || document.getElementById('kortB').hidden) return;
+    synkroniserer = true; til.setView(fra.getCenter(), fra.getZoom(), { animate: false }); synkroniserer = false;
+  });
+}
+synk(kortA, kortB); synk(kortB, kortA);
+
+// Etiket i hjørnet af hvert kort ("Scenarie A – Hverdag 07:30")
+function lavEtiket(m) {
+  const c = L.control({ position: 'topright' });
+  c.onAdd = () => { const d = L.DomUtil.create('div', 'kortetiket'); d.hidden = true; return d; };
+  c.addTo(m); return c;
+}
+const etiketA = lavEtiket(kortA), etiketB = lavEtiket(kortB);
+// Forklaring (legende)
+function lavLegende(m) {
+  const c = L.control({ position: 'bottomright' });
+  c.onAdd = () => { const d = L.DomUtil.create('div', 'legende'); d.hidden = true; return d; };
+  c.addTo(m); return c;
+}
+const legendeA = lavLegende(kortA), legendeB = lavLegende(kortB);
+
+
+/* ======================================================================
+   DEL 4 – SKÆRMBILLEDET: tegner indstillingerne i sidepanelet
+   ====================================================================== */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = (x, d = 1) => (x == null || !isFinite(x)) ? '–' : x.toLocaleString('da-DK', { minimumFractionDigits: d, maximumFractionDigits: d });
+const scenTekst = sc => `${DAGE[sc.dag] || sc.dag} kl. ${sc.tid}`;
+
+function hentSti(o, sti) { return sti.split('.').reduce((a, k) => a == null ? a : a[k], o); }
+function saetSti(o, sti, v) {
+  const d = sti.split('.'); let a = o;
+  for (let i = 0; i < d.length - 1; i++) a = a[d[i]];
+  a[d[d.length - 1]] = v;
+}
+
+// Fylder alle felter med data-k ud fra indstillingerne
+function udfyldFelter() {
+  for (const el of document.querySelectorAll('[data-k]')) {
+    const v = hentSti(S, el.dataset.k);
+    if (el.type === 'checkbox') el.checked = !!v;
+    else el.value = v ?? '';
+  }
+  $('tiderFelt').value = S.tider.join(', ');
+}
+
+function fyldDage() {
+  for (const id of ['dagA', 'dagB']) $(id).innerHTML = Object.entries(DAGE).map(([k, n]) => `<option value="${k}">${n}</option>`).join('');
+}
+
+function renderStationer() {
+  $('stationsListe').innerHTML = S.stationer.map((s, i) => `
+    <div class="station">
+      <span class="snr">${i + 1}</span>
+      <input type="text" data-k="stationer.${i}.navn" value="${esc(s.navn)}" aria-label="Stationens navn">
+      <label class="chk" title="Med i beregningen"><input type="checkbox" data-k="stationer.${i}.aktiv" ${s.aktiv ? 'checked' : ''}> Aktiv</label>
+      <button class="ikonknap" data-act="slet-station" data-i="${i}" aria-label="Fjern station">×</button>
+      <div class="koord">${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}</div>
+    </div>`).join('') || '<p class="hint">Ingen stationer endnu.</p>';
+  $('antalStationer').textContent = S.stationer.length ? `${S.stationer.filter(s => s.aktiv).length} aktiv(e)` : '';
+  tegnStationer();
+}
+
+// Valgmuligheder 1–7 min i halve minutter
+function afgangValg(valgt) {
+  let h = '';
+  for (let v = AFGANG_MIN; v <= AFGANG_MAX; v += 0.5) h += `<option value="${v}" ${Number(valgt) === v ? 'selected' : ''}>${String(v).replace('.', ',')} min</option>`;
+  return h;
+}
+function renderVejTabel() {
+  $('vejTabel').innerHTML = `<thead><tr><th>Vejtype</th><th>Uden skilt (km/t)</th></tr></thead><tbody>` +
+    VEJTYPER.map(v => `<tr><td>${VEJTYPE_NAVN[v]}</td>
+      <td><input type="number" min="5" step="5" data-k="vej.${v}.normal" data-t="num" value="${S.vej[v].normal}" aria-label="${VEJTYPE_NAVN[v]} km/t uden skilt"></td></tr>`).join('') + `</tbody>`;
+}
+
+const KURVEFARVE = { mantor: 'var(--accent)', fredag: 'var(--warn)', lordag: 'var(--ok)', sondag: 'var(--muted)' };
+function renderTrafik() {
+  // Tabel: myldretidsbelastning pr. vejtype og den aktuelle belastning i scenarierne
+  const TA = trafikTilstand(S, S.scenA.dag, S.scenA.tid), TB = trafikTilstand(S, S.scenB.dag, S.scenB.tid);
+  $('trafikTabel').innerHTML = `<thead><tr><th>Vejtype</th><th>Myldretid</th><th>Nu A</th>${S.sammenlign ? '<th>Nu B</th>' : ''}</tr></thead><tbody>` +
+    VEJTYPER.map(v => `<tr><td>${VEJTYPE_NAVN[v]}</td>
+      <td><input type="number" min="0" max="1" step="0.05" data-k="trafik.spids.${v}" data-t="num" value="${S.trafik.spids[v]}" aria-label="${VEJTYPE_NAVN[v]} belastningsgrad i myldretid"></td>
+      <td class="tal">${fmt(TA.B[v], 2)}</td>${S.sammenlign ? `<td class="tal">${fmt(TB.B[v], 2)}</td>` : ''}</tr>`).join('') + '</tbody>';
+  // Graf over døgnet
+  const W = 360, H = 150, x0 = 26, x1 = W - 6, y0 = 10, y1 = H - 22;
+  const X = t => x0 + (x1 - x0) * t / 24, Y = n => y1 - (y1 - y0) * Math.min(n, 1.05) / 1.05;
+  let h = '';
+  for (const n of [0, 0.5, 1]) h += `<line x1="${x0}" x2="${x1}" y1="${Y(n)}" y2="${Y(n)}" stroke="var(--line)" stroke-width="1"/><text x="${x0 - 4}" y="${Y(n) + 3}" text-anchor="end">${Math.round(n * 100)}%</text>`;
+  for (const t of [0, 6, 12, 18, 24]) h += `<text x="${X(t)}" y="${H - 8}" text-anchor="middle">${String(t).padStart(2, '0')}</text>`;
+  for (const dag of Object.keys(DAGE)) {
+    let d = '';
+    for (let m = 0; m <= 24 * 60; m += 20) d += (m ? 'L' : 'M') + X(m / 60).toFixed(1) + ' ' + Y(trafikNiveau(dag, `${Math.floor(m / 60)}:${m % 60}`)).toFixed(1);
+    const aktiv = dag === S.scenA.dag || (S.sammenlign && dag === S.scenB.dag);
+    h += `<path d="${d}" fill="none" stroke="${KURVEFARVE[dag]}" stroke-width="${aktiv ? 2.2 : 1.2}" opacity="${aktiv ? 1 : 0.45}"/>`;
+  }
+  const prik = (sc, navn) => { const t = tilMinutter(sc.tid) / 60, n = trafikNiveau(sc.dag, sc.tid);
+    return `<line x1="${X(t)}" x2="${X(t)}" y1="${y0}" y2="${y1}" stroke="var(--fg)" stroke-width="1" stroke-dasharray="2 2" opacity=".5"/><circle cx="${X(t)}" cy="${Y(n)}" r="4.5" fill="var(--panel)" stroke="var(--fg)" stroke-width="1.6"/><text x="${X(t) + 6}" y="${Math.max(Y(n) - 6, y0 + 8)}" style="fill:var(--fg);font-weight:600">${navn}</text>`; };
+  h += prik(S.scenA, 'A'); if (S.sammenlign) h += prik(S.scenB, 'B');
+  // Forklaring
+  let lx = x0;
+  for (const [dag, navn] of Object.entries(DAGE)) { h += `<line x1="${lx}" x2="${lx + 10}" y1="${y0 - 3}" y2="${y0 - 3}" stroke="${KURVEFARVE[dag]}" stroke-width="2"/><text x="${lx + 13}" y="${y0}">${navn.replace('/helligdag', '')}</text>`; lx += navn.length * 4.6 + 26; }
+  $('doegnGraf').innerHTML = h;
+}
+
+// Viser kort, hvad trafikken betyder for brandbilen på det valgte tidspunkt (målt på en byvej)
+function krydsTekst(T) {
+  const g = S.krydsGrund, B = T.B.byvej;
+  const sig = g.signal + T.andel * krydsTrafik('signal', B), rund = g.rundkorsel + T.andel * krydsTrafik('rundkorsel', B);
+  return `Trafik: <b>${esc(T.navn)}</b> · lyskryds ca. ${fmt(sig, 0)} sek., rundkørsel ca. ${fmt(rund, 0)} sek. (byvej)`;
+}
+function renderPeriodeVisning() {
+  $('perA').innerHTML = krydsTekst(trafikTilstand(S, S.scenA.dag, S.scenA.tid));
+  $('perB').innerHTML = krydsTekst(trafikTilstand(S, S.scenB.dag, S.scenB.tid));
+  $('scenBBoks').hidden = !S.sammenlign;
+  renderTrafik();
+}
+
+function renderSparringer() {
+  $('sparListe').innerHTML = S.sparringer.map((s, i) => `
+    <div class="station" style="grid-template-columns:auto 1fr auto">
+      <span class="snr" style="background:${s.type === 'lukket' ? '#b3261e' : '#d98a00'}">${s.type === 'lukket' ? '✕' : '!'}</span>
+      <input type="text" data-k="sparringer.${i}.note" value="${esc(s.note || '')}" placeholder="${s.type === 'lukket' ? 'Lukket vej' : 'Vejarbejde −' + s.fald + ' %'}" aria-label="Beskrivelse">
+      <button class="ikonknap" data-act="slet-sparring" data-i="${i}" aria-label="Fjern">×</button>
+      <div class="koord" style="grid-column:2/-1">${s.type === 'lukket' ? 'Lukket' : 'Vejarbejde −' + s.fald + ' %'} · radius ${s.radius} m</div>
+    </div>`).join('');
+  $('antalSparr').textContent = S.sparringer.length ? `${S.sparringer.length} markeret` : '';
+  tegnSparringer();
+}
+
+function opdaterRadiusHint() {
+  const maxT = Math.max(...S.tider, 1);
+  $('radiusFelt').placeholder = `auto (ca. ${autoRadius(maxT).toFixed(0)} km)`;
+}
+// Når kurven alligevel ud til kanten, udvides området automatisk under beregningen.
+function startTid() { return Math.max(0, Number(S.klar) || 0) + Math.max(0, Number(S.parkering) || 0); }
+// Søgeradius: køretiden (mødetid minus klar- og parkeringstid) × ca. 84 km/t i luftlinje + 1 km
+function autoRadius(maxT) {
+  return Math.min(40, Math.max(2, Math.max(maxT - startTid(), 0.5) * 1.4 + 1));
+}
+
+function opdaterLayout() {
+  const side = S.sammenlign && S.visning === 'side' && !!(RES && RES.scen.B);
+  $('kortomr').classList.toggle('side', side);
+  $('kortB').hidden = !side;
+  setTimeout(() => { kortA.invalidateSize(); kortB.invalidateSize(); if (side) kortB.setView(kortA.getCenter(), kortA.getZoom(), { animate: false }); }, 30);
+}
+
+function renderAlt() {
+  udfyldFelter(); renderStationer(); renderVejTabel(); renderPeriodeVisning(); renderSparringer(); renderBopaele(); opdaterRadiusHint(); saetBaggrund();
+}
+
+/* Markører på kortet */
+function stationIkon(i) { return L.divIcon({ className: 'stationsikon', html: String(i + 1), iconSize: [26, 26], iconAnchor: [13, 13] }); }
+function tegnStationer() {
+  for (const m of [kortA, kortB]) {
+    m.lag.stationer.clearLayers();
+    S.stationer.forEach((s, i) => {
+      const mk = L.marker([s.lat, s.lon], { icon: stationIkon(i), draggable: m === kortA, opacity: s.aktiv ? 1 : 0.45, title: s.navn });
+      mk.bindTooltip(esc(s.navn), { direction: 'top', offset: [0, -12] });
+      if (m === kortA) mk.on('dragend', e => {
+        const p = e.target.getLatLng(); s.lat = p.lat; s.lon = p.lng; gem(); renderStationer(); markerForaeldet();
+      });
+      mk.addTo(m.lag.stationer);
+    });
+  }
+}
+function tegnSparringer() {
+  for (const m of [kortA, kortB]) {
+    m.lag.sparr.clearLayers();
+    for (const s of S.sparringer) {
+      const c = s.type === 'lukket' ? '#b3261e' : '#d98a00';
+      L.circle([s.lat, s.lon], { radius: s.radius, color: c, weight: 2, fillColor: c, fillOpacity: 0.25, dashArray: s.type === 'lukket' ? null : '4 3' })
+        .bindTooltip(esc(s.note || (s.type === 'lukket' ? 'Lukket vej' : `Vejarbejde (−${s.fald} %)`)))
+        .addTo(m.lag.sparr);
+    }
+  }
+}
+
+
+/* ======================================================================
+   DEL 5 – BRUGERENS HANDLINGER (klik, indtastning)
+   ====================================================================== */
+let klikTilstand = null; // 'station' | 'lukket' | 'arbejde' | null
+function saetKlikTilstand(t) {
+  klikTilstand = (klikTilstand === t) ? null : t;
+  $('klikStation').classList.toggle('aktiv', klikTilstand === 'station');
+  $('klikLukket').classList.toggle('aktiv', klikTilstand === 'lukket');
+  $('klikArbejde').classList.toggle('aktiv', klikTilstand === 'arbejde');
+  $('klikBopael').classList.toggle('aktiv', klikTilstand === 'bopael');
+  const tekst = { station: 'Klik på kortet for at placere en station', lukket: 'Klik på vejen, der er lukket', arbejde: 'Klik på vejen med vejarbejde', bopael: 'Klik på bopælen' }[klikTilstand];
+  $('banner').hidden = !tekst; $('banner').textContent = (tekst || '') + ' · Esc for at stoppe';
+  for (const id of ['kortA', 'kortB']) $(id).classList.toggle('klikmode', !!klikTilstand);
+}
+$('klikStation').onclick = () => saetKlikTilstand('station');
+$('klikLukket').onclick = () => saetKlikTilstand('lukket');
+$('klikArbejde').onclick = () => saetKlikTilstand('arbejde');
+$('klikBopael').onclick = () => saetKlikTilstand('bopael');
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && klikTilstand) saetKlikTilstand(klikTilstand); });
+
+function kortKlik(e) {
+  if (!klikTilstand) return;
+  const { lat, lng } = e.latlng;
+  if (klikTilstand === 'station') {
+    S.stationer.push({ id: uid(), navn: `Station ${S.stationer.length + 1}`, lat, lon: lng, aktiv: true, afgang: 2 });
+    renderStationer(); saetKlikTilstand('station');
+  } else if (klikTilstand === 'bopael') {
+    nyBopael(`Punkt ${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng);
+    saetKlikTilstand('bopael');
+    return;
+  } else {
+    S.sparringer.push({ id: uid(), type: klikTilstand, lat, lon: lng, radius: Number($('sparRadius').value) || 30, fald: Number($('sparFald').value) || 50, note: '' });
+    renderSparringer();
+  }
+  gem(); markerForaeldet();
+}
+kortA.on('click', kortKlik); kortB.on('click', kortKlik);
+
+// Alle felter med data-k opdaterer indstillingerne direkte
+$('side').addEventListener('change', e => {
+  const el = e.target;
+  const k = el.dataset.k; if (!k) return;
+  let v;
+  if (el.type === 'checkbox') v = el.checked;
+  else if (el.dataset.t === 'num') {
+    if (el.value === '') v = null; else { v = Number(String(el.value).replace(',', '.')); if (!isFinite(v)) return; }
+  } else v = el.value;
+  saetSti(S, k, v); gem();
+  if (k.startsWith('stationer')) { renderStationer(); opdaterRadiusHint(); }
+  if (k === 'klar' || k === 'parkering') opdaterRadiusHint();
+  if (k.startsWith('bopaele')) { renderBopaele(); return; }
+  if (k === 'visning' || k === 'sammenlign') renderBopaele();
+  if (k.startsWith('sparringer')) { tegnSparringer(); }
+  if (k.startsWith('scen') || k.startsWith('trafik') || k.startsWith('krydsGrund') || k === 'sammenlign' || k === 'udrykning') renderPeriodeVisning();
+  if (k === 'kort') saetBaggrund();
+  if (k === 'visning' || k === 'sammenlign') { opdaterLayout(); tegnResultater(); }
+  if (k !== 'kort' && !k.endsWith('.navn') && !k.endsWith('.note') && k !== 'visning') markerForaeldet();
+});
+$('tiderFelt').addEventListener('change', () => {
+  const t = [...new Set($('tiderFelt').value.split(/[,;\s]+/).map(x => Number(x.replace(',', '.'))).filter(x => x > 0 && x <= 120))].sort((a, b) => a - b).slice(0, 6);
+  if (t.length) S.tider = t;
+  $('tiderFelt').value = S.tider.join(', ');
+  gem(); opdaterRadiusHint(); markerForaeldet();
+});
+
+// Knapper med data-act
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const i = Number(b.dataset.i);
+  switch (b.dataset.act) {
+    case 'slet-station': S.stationer.splice(i, 1); renderStationer(); break;
+    case 'slet-sparring': S.sparringer.splice(i, 1); renderSparringer(); break;
+    case 'gem-fil': hentFil(new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' }), `modetid-indstillinger-${datoStempel()}.json`); return;
+    case 'hent-fil': $('filInput').click(); return;
+    case 'nulstil': $('nulstilBekraeft').hidden = false; return;
+    case 'nulstil-nej': $('nulstilBekraeft').hidden = true; return;
+    case 'nulstil-ja': S = standardIndstillinger(); $('nulstilBekraeft').hidden = true; renderAlt(); break;
+    case 'eks-geojson': eksGeoJSON(); return;
+    case 'eks-png': eksPNG(); return;
+    case 'eks-pdf': eksPDF(); return;
+    case 'tael-adresser': taelAdresser(); return;
+    case 'slet-bopael': S.bopaele.splice(i, 1); if (valgtBopael >= S.bopaele.length) valgtBopael = S.bopaele.length - 1; gem(); renderBopaele(); return;
+    case 'vis-bopael': valgtBopael = i; renderBopaele(); { const b = S.bopaele[i]; if (b) kortA.setView([b.lat, b.lon], Math.max(kortA.getZoom(), 13)); } return;
+    case 'ryd-cache': await lagerRyd(); G = null; CACHE = null; ADRESSER = null; status('Mellemlageret er ryddet. Næste beregning henter vejnettet forfra.', 'ok'); return;
+    default: return;
+  }
+  gem(); markerForaeldet();
+});
+$('filInput').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { S = retAfgang(flet(standardIndstillinger(), JSON.parse(await f.text()))); gem(); renderAlt(); status('Indstillinger indlæst.', 'ok'); }
+  catch (err) { status('Filen kunne ikke læses. Vælg en .json-fil gemt fra dette program.', 'fejl'); }
+  e.target.value = '';
+});
+
+// Adressesøgning (Nominatim)
+async function soeg() {
+  const q = $('soegFelt').value.trim(); if (!q) return;
+  $('soegeRes').innerHTML = '<span class="hint">Søger…</span>';
+  try {
+    let r = await (await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=dk&accept-language=da&q=' + encodeURIComponent(q))).json();
+    if (!r.length) r = await (await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&accept-language=da&q=' + encodeURIComponent(q))).json();
+    if (!r.length) { $('soegeRes').innerHTML = '<span class="hint">Intet fundet. Prøv med postnummer eller by.</span>'; return; }
+    $('soegeRes').innerHTML = r.map((x, i) => `<button data-sr="${i}">${esc(x.display_name)}</button>`).join('');
+    $('soegeRes').querySelectorAll('[data-sr]').forEach(bt => bt.onclick = () => {
+      const x = r[Number(bt.dataset.sr)];
+      S.stationer.push({ id: uid(), navn: x.display_name.split(',').slice(0, 2).join(','), lat: Number(x.lat), lon: Number(x.lon), aktiv: true, afgang: 2 });
+      $('soegeRes').innerHTML = ''; $('soegFelt').value = '';
+      gem(); renderStationer(); markerForaeldet();
+      kortA.setView([Number(x.lat), Number(x.lon)], 13);
+    });
+  } catch (err) { $('soegeRes').innerHTML = '<span class="hint">Søgningen fejlede. Tjek internetforbindelsen.</span>'; }
+}
+$('soegKnap').onclick = soeg;
+
+/* ---------- Test en bopæl ---------- */
+let valgtBopael = -1;
+function nyBopael(navn, lat, lon) {
+  S.bopaele.push({ id: uid(), navn, lat, lon });
+  if (S.bopaele.length > 25) S.bopaele.shift();
+  valgtBopael = S.bopaele.length - 1;
+  gem(); renderBopaele();
+  if (!RES) status('Bopælen er tilføjet. Tryk "Beregn mødetid" for at se mødetiden.', 'adv');
+}
+async function soegBopael() {
+  const q = $('bopSoeg').value.trim(); if (!q) return;
+  $('bopSoegeRes').innerHTML = '<span class="hint">Søger…</span>';
+  try {
+    const r = await (await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=dk&accept-language=da&q=' + encodeURIComponent(q))).json();
+    if (!r.length) { $('bopSoegeRes').innerHTML = '<span class="hint">Intet fundet. Prøv med postnummer eller by.</span>'; return; }
+    $('bopSoegeRes').innerHTML = r.map((x, i) => `<button data-br="${i}">${esc(x.display_name)}</button>`).join('');
+    $('bopSoegeRes').querySelectorAll('[data-br]').forEach(bt => bt.onclick = () => {
+      const x = r[Number(bt.dataset.br)];
+      $('bopSoegeRes').innerHTML = ''; $('bopSoeg').value = '';
+      nyBopael(x.display_name.split(',').slice(0, 2).join(','), Number(x.lat), Number(x.lon));
+      kortA.setView([Number(x.lat), Number(x.lon)], Math.max(kortA.getZoom(), 13));
+    });
+  } catch (err) { $('bopSoegeRes').innerHTML = '<span class="hint">Søgningen fejlede. Tjek internetforbindelsen.</span>'; }
+}
+$('bopSoegKnap').onclick = soegBopael;
+$('bopSoeg').addEventListener('keydown', e => { if (e.key === 'Enter') soegBopael(); });
+
+// Mødetid fra et punkt: nærmeste vej → hurtigste rute ind til stationen
+function bopaelTid(sc, lat, lon) {
+  if (!G || !sc || !sc.res) return null;
+  const k = naermesteKnude(G, lat, lon);
+  if (k.idx < 0) return { fejl: 'ingen vej' };
+  const { knudeT, dist, nxt } = sc.res;
+  const t = knudeT[k.idx];
+  if (!isFinite(t)) return { over: true, afstand: k.afstand };
+  // Følg ruten: start med det hurtigste vejstykke ud fra punktet
+  let s = -1, bd = Infinity;
+  for (let i = G.udStart[k.idx]; i < G.udStart[k.idx + 1]; i++) { const x = G.udListe[i]; if (dist[x] < bd) { bd = dist[x]; s = x; } }
+  const rute = [[G.lat[k.idx], G.lon[k.idx]]]; let meter = 0, n = 0;
+  while (s >= 0 && n++ < 20000) { rute.push([G.lat[G.sTil[s]], G.lon[G.sTil[s]]]); meter += G.sLaengde[s]; s = nxt[s]; }
+  return { t, rute, km: meter / 1000, afstand: k.afstand };
+}
+function tidTekst(t) { const m = Math.floor(t + 1e-9), sek = Math.round((t - m) * 60); return sek === 60 ? `${m + 1}:00` : `${m}:${String(sek).padStart(2, '0')}`; }
+function bopaelChip(x, navn) {
+  const graense = RES ? Math.max(...RES.tider) : 5;
+  if (!x) return `<span class="chip ukendt">${navn} –</span>`;
+  if (x.fejl) return `<span class="chip ukendt">${navn} ingen vej</span>`;
+  if (x.over) return `<span class="chip nej">${navn} over ${fmt(RES.soegT, 0)} min</span>`;
+  return `<span class="chip ${x.t <= graense ? 'ok' : 'nej'}">${navn} ${tidTekst(x.t)} min</span>`;
+}
+function husIkon(i, valgt) { return L.divIcon({ className: 'husikon', html: String(i + 1), iconSize: valgt ? [26, 26] : [22, 22], iconAnchor: valgt ? [13, 13] : [11, 11] }); }
+function renderBopaele() {
+  const A = RES ? RES.scen.A : null, B = RES && S.sammenlign ? RES.scen.B : null;
+  const res = S.bopaele.map(b => ({ a: A ? bopaelTid(A, b.lat, b.lon) : null, b: B ? bopaelTid(B, b.lat, b.lon) : null }));
+  $('bopaeleListe').innerHTML = S.bopaele.map((b, i) => `
+    <div class="bopael">
+      <span class="hus" style="${i === valgtBopael ? 'background:var(--accent)' : ''}">${i + 1}</span>
+      <input type="text" data-k="bopaele.${i}.navn" value="${esc(b.navn)}" aria-label="Navn på bopæl">
+      <button class="ikonknap" data-act="slet-bopael" data-i="${i}" aria-label="Fjern bopæl">×</button>
+      <div class="tider">${RES ? bopaelChip(res[i].a, 'A') + (B ? bopaelChip(res[i].b, 'B') : '') : '<span class="hint">Beregn for at se mødetiden</span>'}
+        ${RES && res[i].a && res[i].a.km != null ? `<span class="hint">${fmt(res[i].a.km, 1)} km ad vej</span>` : ''}
+        <button class="vis" data-act="vis-bopael" data-i="${i}">Vis rute</button></div>
+    </div>`).join('');
+  $('antalBopael').textContent = S.bopaele.length ? `${S.bopaele.length} testet` : '';
+  // Kort: markører og rute for den valgte bopæl
+  for (const m of [kortA, kortB]) { m.lag.bopael.clearLayers(); m.lag.rute.clearLayers(); }
+  S.bopaele.forEach((b, i) => {
+    const tips = [b.navn];
+    if (res[i].a && res[i].a.t != null) tips.push('A: ' + tidTekst(res[i].a.t) + ' min');
+    if (res[i].b && res[i].b.t != null) tips.push('B: ' + tidTekst(res[i].b.t) + ' min');
+    for (const m of [kortA, kortB]) L.marker([b.lat, b.lon], { icon: husIkon(i, i === valgtBopael), title: b.navn })
+      .bindTooltip(tips.map(esc).join('<br>'), { direction: 'top', offset: [0, -10] })
+      .on('click', () => { valgtBopael = i; renderBopaele(); })
+      .addTo(m.lag.bopael);
+  });
+  const v = res[valgtBopael];
+  if (v) {
+    if (v.a && v.a.rute) L.polyline(v.a.rute, { color: '#1f5fbf', weight: 5, opacity: .85 }).addTo(kortA.lag.rute);
+    if (v.b && v.b.rute) {
+      const side = S.visning === 'side';
+      L.polyline(v.b.rute, { color: '#1f5fbf', weight: side ? 5 : 3, opacity: .85, dashArray: side ? null : '6 6' }).addTo(side ? kortB.lag.rute : kortA.lag.rute);
+    }
+  }
+}
+
+// Længste afstand i luftlinje fra nærmeste aktive station til et felt inden for hver mødetid
+function laengstVaek(gr, tider, stationer) {
+  const ud = tider.map(() => 0);
+  for (let iy = 0; iy < gr.ny; iy++) {
+    const la = gr.originLat + iy * gr.celle / gr.ky;
+    for (let ix = 0; ix < gr.nx; ix++) {
+      const v = gr.val[iy * gr.nx + ix]; if (v >= UOPNAAET) continue;
+      const lo = gr.originLon + ix * gr.celle / gr.kx;
+      let d = Infinity; for (const s of stationer) d = Math.min(d, afstand(la, lo, s.lat, s.lon));
+      tider.forEach((t, i) => { if (v <= t && d > ud[i]) ud[i] = d; });
+    }
+  }
+  return ud.map(m => m / 1000);
+}
+$('soegFelt').addEventListener('keydown', e => { if (e.key === 'Enter') soeg(); });
+
+function status(t, kl = '') { const s = $('status'); s.textContent = t; s.className = 'status ' + kl; }
+function markerForaeldet() { if (RES && !travl) status('Indstillingerne er ændret – tryk "Beregn kørekurver" for at opdatere.', 'adv'); }
+const pause = () => new Promise(r => setTimeout(r, 20));
+const datoStempel = () => new Date().toISOString().slice(0, 10);
+
+
+/* ======================================================================
+   DEL 6 – HENT VEJNET OG REGN
+   ====================================================================== */
+/* Vejnettet hentes fra de gratis Overpass-servere i felter på ca. 9 × 9 km.
+   Små forespørgsler er langt hurtigere og mere stabile end én stor.
+   Hvert felt gemmes i browseren i 30 dage, så næste beregning går hurtigt. */
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+const NET = { svarGraense: 90000, samtidige: 2, pause: 4000 }; // ventetid pr. forespørgsel (ms), felter ad gangen
+const FELT_LAT = 0.08, FELT_LON = 0.14;   // feltstørrelse i grader (≈ 8,9 × 8,8 km i Danmark)
+const MELLEMLAGER_DAGE = 30;
+let afbryd = null;                       // bruges af knappen "Afbryd"
+let godServer = 0;                       // den server, der senest svarede – prøves først næste gang
+
+function stopFejl() { const e = new Error('Beregningen blev afbrudt.'); e.stop = true; return e; }
+function vent(ms, signal) {
+  return new Promise((ok, fejl) => {
+    const t = setTimeout(ok, ms);
+    signal?.addEventListener('abort', () => { clearTimeout(t); fejl(stopFejl()); }, { once: true });
+  });
+}
+
+// Sender én forespørgsel. Prøver næste server, hvis en er langsom, optaget eller giver fejl.
+async function overpass(q, signal) {
+  let sidste = null;
+  for (let forsoeg = 0; forsoeg < OVERPASS.length * 2; forsoeg++) {
+    if (signal?.aborted) throw stopFejl();
+    const nr = (godServer + forsoeg) % OVERPASS.length, url = OVERPASS[nr];
+    const ac = new AbortController();
+    let forSent = false;
+    const timer = setTimeout(() => { forSent = true; ac.abort(); }, NET.svarGraense);
+    const stop = () => ac.abort();
+    signal?.addEventListener('abort', stop);
+    try {
+      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ac.signal });
+      if (r.status === 429 || r.status === 503 || r.status === 504) {
+        sidste = new Error(r.status === 429 ? 'serverne er optaget' : 'serveren havde for travlt');
+        clearTimeout(timer);
+        await vent(NET.pause * (forsoeg < OVERPASS.length ? 1 : 2), signal);
+        continue;
+      }
+      if (!r.ok) throw new Error('HTTP-fejl ' + r.status);
+      const d = await r.json();
+      // Overpass svarer "200 OK" med halve data, hvis den løber tør for tid – det må ikke bruges
+      if (d.remark && /runtime error|timed out|out of memory/i.test(d.remark)) throw new Error('serveren nåede ikke at blive færdig');
+      godServer = nr;
+      return d;
+    } catch (e) {
+      if (signal?.aborted) throw stopFejl();
+      sidste = forSent ? new Error(`serveren svarede ikke inden for ${Math.round(NET.svarGraense / 1000)} sekunder`) : e;
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', stop); }
+  }
+  throw new Error('Kunne ikke hente data fra OpenStreetMap (' + (sidste ? sidste.message : 'ukendt fejl') + '). Vent et minut og prøv igen.');
+}
+
+/* Mellemlager i browseren (IndexedDB). Virker det ikke, hentes data bare hver gang. */
+let dbLover = null;
+function aabnLager() {
+  if (!dbLover) dbLover = new Promise(ok => {
+    try {
+      const r = indexedDB.open('korekurver-mellemlager', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('felter');
+      r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); r.onblocked = () => ok(null);
+    } catch (e) { ok(null); }
+  });
+  return dbLover;
+}
+async function lagerHent(noegle) {
+  const db = await aabnLager(); if (!db) return null;
+  return new Promise(ok => {
+    try {
+      const r = db.transaction('felter').objectStore('felter').get(noegle);
+      r.onsuccess = () => { const v = r.result; ok(v && Date.now() - v.t < MELLEMLAGER_DAGE * 864e5 ? v.d : null); };
+      r.onerror = () => ok(null);
+    } catch (e) { ok(null); }
+  });
+}
+async function lagerGem(noegle, d) {
+  const db = await aabnLager(); if (!db) return;
+  try { db.transaction('felter', 'readwrite').objectStore('felter').put({ t: Date.now(), d }, noegle); } catch (e) {}
+}
+async function lagerRyd() {
+  const db = await aabnLager(); if (!db) return;
+  await new Promise(ok => { try { const t = db.transaction('felter', 'readwrite'); t.objectStore('felter').clear(); t.oncomplete = ok; t.onerror = ok; } catch (e) { ok(); } });
+}
+
+// Hvilke felter skal hentes for at dække en cirkel med radius R (meter) om hver station?
+function felterOmStationer(stationer, R) {
+  const ud = new Map();
+  for (const s of stationer) {
+    const dLat = R / 110574, dLon = R / (111320 * Math.cos(s.lat * Math.PI / 180));
+    for (let i = Math.floor((s.lat - dLat) / FELT_LAT); i <= Math.floor((s.lat + dLat) / FELT_LAT); i++) {
+      for (let j = Math.floor((s.lon - dLon) / FELT_LON); j <= Math.floor((s.lon + dLon) / FELT_LON); j++) {
+        const f = feltFra(i, j);
+        const la = Math.max(f.s, Math.min(f.n, s.lat)), lo = Math.max(f.w, Math.min(f.e, s.lon));
+        if (afstand(s.lat, s.lon, la, lo) <= R) ud.set(f.id, f);
+      }
+    }
+  }
+  return [...ud.values()];
+}
+function felterIFirkant(bb) { // bb = [vest, syd, øst, nord]
+  const ud = [];
+  for (let i = Math.floor(bb[1] / FELT_LAT); i <= Math.floor(bb[3] / FELT_LAT); i++)
+    for (let j = Math.floor(bb[0] / FELT_LON); j <= Math.floor(bb[2] / FELT_LON); j++) ud.push(feltFra(i, j));
+  return ud;
+}
+function feltFra(i, j) {
+  const s = i * FELT_LAT, w = j * FELT_LON;
+  return { id: i + '_' + j, s, w, n: s + FELT_LAT, e: w + FELT_LON, bb: `(${s.toFixed(5)},${w.toFixed(5)},${(s + FELT_LAT).toFixed(5)},${(w + FELT_LON).toFixed(5)})` };
+}
+
+const VEJE_HW = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street';
+function vejForespoergsel(f, service) {
+  return `[out:json][timeout:80];(way["highway"~"^(${VEJE_HW})$"]["area"!="yes"]${f.bb};` +
+    (service ? `way["highway"="service"]["service"!~"^(parking_aisle|driveway|drive-through)$"]["area"!="yes"]${f.bb};` : '') +
+    `)->.w;.w out geom qt;node(w.w)["highway"="traffic_signals"];out skel qt;rel(bw.w)["type"="restriction"];out body qt;`;
+}
+function adresseForespoergsel(f) {
+  return `[out:json][timeout:80];node["addr:housenumber"]${f.bb};out skel qt;way["addr:housenumber"]${f.bb};out ids center qt;`;
+}
+
+// Fjerner alt, programmet ikke bruger – så fylder data mindre i hukommelsen og i mellemlageret
+const BEHOLD_VEJ = ['highway', 'maxspeed', 'oneway', 'junction', 'area'];
+function slank(el) {
+  if (el.type === 'way') {
+    const t = {}; for (const k of BEHOLD_VEJ) if (el.tags && el.tags[k] != null) t[k] = el.tags[k];
+    return { type: 'way', id: el.id, nodes: el.nodes, geometry: el.geometry, tags: t };
+  }
+  if (el.type === 'relation') {
+    const t = {}; for (const k in (el.tags || {})) if (k === 'type' || k === 'except' || k.startsWith('restriction')) t[k] = el.tags[k];
+    return { type: 'relation', id: el.id, tags: t, members: (el.members || []).map(m => ({ type: m.type, ref: m.ref, role: m.role })) };
+  }
+  if (el.center) return { type: el.type, id: el.id, lat: el.center.lat, lon: el.center.lon };
+  return { type: el.type, id: el.id, lat: el.lat, lon: el.lon };
+}
+
+/* Henter en række felter – to ad gangen – og samler dem. Viser fremdrift undervejs. */
+async function hentFelter(felter, slags, lavQ, signal, tekst) {
+  const samlet = new Map();
+  let faerdige = 0, fraLager = 0;
+  const t0 = Date.now();
+  const vis = () => status(`${tekst}: ${faerdige} af ${felter.length} felter (${Math.round((Date.now() - t0) / 1000)} sek.)` +
+    (fraLager ? ` – ${fraLager} fra mellemlageret` : '') + '. Første gang i et område tager typisk ½–2 min.');
+  vis();
+  const ur = setInterval(vis, 1000);
+  const kø = [...felter];
+  const arbejder = async () => {
+    while (kø.length) {
+      const f = kø.shift();
+      const noegle = slags + '|' + f.id;
+      let el = await lagerHent(noegle);
+      if (el) fraLager++;
+      else {
+        const d = await overpass(lavQ(f), signal);
+        el = d.elements.map(slank);
+        lagerGem(noegle, el);
+      }
+      for (const e of el) samlet.set(e.type[0] + e.id, e);
+      faerdige++; vis();
+    }
+  };
+  try { await Promise.all(Array.from({ length: Math.min(NET.samtidige, felter.length) }, arbejder)); }
+  finally { clearInterval(ur); }
+  return [...samlet.values()];
+}
+
+let G = null, CACHE = null, RES = null, ADRESSER = null, travl = false;
+
+async function sikrVejnet(stationer, R, signal) {
+  const service = !!S.beregning.servicevej;
+  const felter = felterOmStationer(stationer, R);
+  const mangler = !G || !CACHE || CACHE.service !== service || felter.some(f => !CACHE.felter.has(f.id));
+  if (mangler) {
+    const el = await hentFelter(felter, 'vej' + (service ? 'S' : ''), f => vejForespoergsel(f, service), signal, 'Henter vejnet fra OpenStreetMap');
+    status('Bygger vejnettet …'); await pause();
+    G = byggGraf({ elements: el });
+    if (!G.nS) throw new Error('Der blev ikke fundet nogen veje i området.');
+    CACHE = { felter: new Set(felter.map(f => f.id)), service };
+  }
+  CACHE.centre = stationer.map(s => ({ lat: s.lat, lon: s.lon }));
+  CACHE.R = R;
+}
+
+// Når kurven ud til kanten af det hentede område?
+function naarKanten(res, maxT) {
+  for (let k = 0; k < G.nK; k++) {
+    if (res.knudeT[k] > maxT) continue;
+    let dmin = Infinity;
+    for (const c of CACHE.centre) dmin = Math.min(dmin, afstand(G.lat[k], G.lon[k], c.lat, c.lon));
+    if (dmin > CACHE.R * 0.94) return true;
+  }
+  return false;
+}
+
+async function beregn() {
+  if (travl) return;
+  const st = S.stationer.filter(s => s.aktiv);
+  if (!st.length) { status('Tilføj mindst én aktiv brandstation.', 'fejl'); return; }
+  const tider = [...S.tider].sort((a, b) => a - b);
+  const maxT = tider[tider.length - 1];
+  travl = true; afbryd = new AbortController(); visTravl(true); saetKlikTilstand(klikTilstand);
+  const signal = afbryd.signal;
+  const advarsler = [];
+  try {
+    const auto = !(Number(S.beregning.radiusKm) > 0);
+    let R = (auto ? autoRadius(maxT, st) : Number(S.beregning.radiusKm)) * 1000;
+    const scen = [['A', S.scenA]]; if (S.sammenlign) scen.push(['B', S.scenB]);
+    let nyRes;
+    // Bopæle testes op til 5 min ud over den længste mødetid
+    const soegT = maxT + 5;
+    // Ved automatisk radius udvides området selv, hvis kurven når ud til kanten (højst to gange)
+    for (let runde = 0; ; runde++) {
+      await sikrVejnet(st, R, signal);
+      const kilder = [];
+      advarsler.length = 0;
+      for (const s of st) {
+        const k = naermesteKnude(G, s.lat, s.lon);
+        if (k.idx < 0) throw new Error(`Ingen vej fundet ved ${s.navn}.`);
+        if (k.afstand > 300) advarsler.push(`${s.navn} ligger ${Math.round(k.afstand)} m fra nærmeste vej`);
+        kilder.push({ idx: k.idx, start: startTid() });
+      }
+      if (startTid() >= tider[0]) advarsler.push(`klar- og parkeringstid er ${fmt(startTid(), 1)} min, så ingen kan nå frem på ${tider[0]} min`);
+      nyRes = { tider, scen: {}, tidspunkt: new Date(), stationer: st.map(s => ({ ...s })) };
+      let kant = [];
+      for (const [n, sc] of scen) {
+        status(`Regner hurtigste veje for scenarie ${n} (${scenTekst(sc)}) …`); await pause();
+        if (signal.aborted) throw stopFejl();
+        const per = trafikTilstand(S, sc.dag, sc.tid);
+        const tid = segmentTider(G, S, per);
+        const res = korDijkstraTil(G, kilder, tid, S, per, soegT);
+        if (naarKanten(res, maxT)) kant.push(n);
+        nyRes.scen[n] = { sc: { ...sc }, per, tid, res };
+      }
+      if (!kant.length) break;
+      if (auto && runde < 2 && R < 45000) { R = Math.min(45000, R * 1.35); status(`Kurven når ud til kanten – udvider området til ${(R / 1000).toFixed(0)} km …`); await pause(); continue; }
+      advarsler.push(`scenarie ${kant.join(' og ')} når ud til kanten af det hentede vejnet – øg søgeradius`);
+      break;
+    }
+    for (const [n] of scen) {
+      status(`Tegner kurver for scenarie ${n} …`); await pause();
+      const x = nyRes.scen[n];
+      const gr = byggGitter(G, x.res, x.tid, S, maxT);
+      if (!gr) throw new Error('Ingen kan nå frem inden for mødetiden. Tjek klar-tid, spærringer og hastigheder.');
+      const k = lavKurver(gr, tider);
+      nyRes.scen[n] = { sc: x.sc, per: x.per, gr, res: x.res, ...k, areal: k.kumulativ.map(f => f ? turf.area(f) / 1e6 : 0), laengst: laengstVaek(gr, tider, st), adresser: null };
+    }
+    RES = nyRes; RES.radiusKm = R / 1000; RES.soegT = soegT; RES.start = startTid();
+    ADRESSER = null;
+    opdaterLayout(); tegnResultater(); visResultater(); renderBopaele();
+    const yderst = RES.scen.A.kumulativ.filter(Boolean).pop();
+    if (yderst) kortA.fitBounds(L.geoJSON(yderst).getBounds(), { padding: [20, 20] });
+    $('taelKnap').disabled = false;
+    status(advarsler.length ? 'Færdig – bemærk: ' + advarsler.join('; ') + '.' : 'Færdig.', advarsler.length ? 'adv' : 'ok');
+  } catch (e) {
+    console.error(e); status(e.message || String(e), e.stop ? 'adv' : 'fejl');
+  } finally { travl = false; afbryd = null; visTravl(false); }
+}
+function visTravl(ja) {
+  $('beregnKnap').disabled = ja;
+  $('beregnKnap').textContent = ja ? 'Beregner …' : 'Beregn mødetid';
+  $('stopKnap').hidden = !ja;
+  $('taelKnap').disabled = ja || !RES;
+}
+$('stopKnap').onclick = () => { if (afbryd) afbryd.abort(); };
+$('beregnKnap').onclick = beregn;
+
+
+/* ======================================================================
+   DEL 7 – VIS RESULTATER PÅ KORTET OG I TABELLEN
+   ====================================================================== */
+function farveFor(i) { const n = RES ? RES.tider.length : S.tider.length; const map = { 1: [0], 2: [0, 4], 3: [0, 2, 4], 4: [0, 2, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5] }; return FARVER[(map[n] || map[6])[i]]; }
+
+function tegnLag(lag, scen, stil) {
+  const n = scen.kumulativ.length;
+  if (stil === 'fyld') {
+    scen.baand.forEach((f, i) => { if (f) L.geoJSON(f, { interactive: false, style: { color: farveFor(i).streg, weight: 1.2, fillColor: farveFor(i).fyld, fillOpacity: 0.32 } }).addTo(lag); });
+  } else {
+    for (let i = n - 1; i >= 0; i--) { const f = scen.kumulativ[i]; if (f) L.geoJSON(f, { interactive: false, style: { color: farveFor(i).streg, weight: 2.6, dashArray: '7 5', fill: false } }).addTo(lag); }
+  }
+}
+function legendeHTML(scenA, scenB, overlay) {
+  const t = RES.tider;
+  let h = `<h4>${overlay ? 'A: ' : ''}${esc(scenTekst(scenA.sc))}</h4>` + t.map((m, i) => `<div class="l"><i style="background:${farveFor(i).fyld}"></i>≤ ${fmt(m, m % 1 ? 1 : 0)} min</div>`).join('');
+  if (overlay && scenB) h += `<h4 style="margin-top:6px">B: ${esc(scenTekst(scenB.sc))}</h4>` + t.map((m, i) => `<div class="l"><i class="str" style="border-color:${farveFor(i).streg}"></i>≤ ${fmt(m, m % 1 ? 1 : 0)} min</div>`).join('');
+  return h;
+}
+function tegnResultater() {
+  for (const m of [kortA, kortB]) { m.lag.baand.clearLayers(); m.lag.streg.clearLayers(); }
+  for (const c of [etiketA, etiketB, legendeA, legendeB]) c.getContainer().hidden = true;
+  if (!RES) return;
+  const A = RES.scen.A, B = S.sammenlign ? RES.scen.B : null;
+  const overlay = !!B && S.visning === 'overlay', side = !!B && S.visning === 'side';
+  tegnLag(kortA.lag.baand, A, 'fyld');
+  if (overlay) tegnLag(kortA.lag.streg, B, 'streg');
+  legendeA.getContainer().innerHTML = legendeHTML(A, B, overlay); legendeA.getContainer().hidden = false;
+  if (side) {
+    tegnLag(kortB.lag.baand, B, 'fyld');
+    legendeB.getContainer().innerHTML = legendeHTML(B, null, false); legendeB.getContainer().hidden = false;
+    etiketA.getContainer().textContent = 'Scenarie A'; etiketA.getContainer().hidden = false;
+    etiketB.getContainer().textContent = 'Scenarie B'; etiketB.getContainer().hidden = false;
+  }
+}
+
+function visResultater() {
+  if (!RES) return;
+  const A = RES.scen.A, B = S.sammenlign ? RES.scen.B : null;
+  const harAdr = A.adresser != null;
+  const kol = (sc, i) => `<td>${fmt(sc.areal[i], 1)}</td><td>${fmt(Math.sqrt(sc.areal[i] / Math.PI), 1)}</td><td>${fmt(sc.laengst[i], 1)}</td>` +
+    (harAdr ? `<td>${sc.adresser ? fmt(sc.adresser[i], 0) : '–'}</td>` : '');
+  const nk = harAdr ? 4 : 3;
+  const hoved = `<th>Areal km²</th><th>Som cirkel, km</th><th>Længst væk, km</th>${harAdr ? '<th>Adresser</th>' : ''}`;
+  let h = `<div class="tab-wrap"><table class="res"><thead>
+    <tr><th></th><th class="grp" colspan="${nk}">A · ${esc(scenTekst(A.sc))}</th>${B ? `<th class="grp" colspan="${nk + 1}">B · ${esc(scenTekst(B.sc))}</th>` : ''}</tr>
+    <tr><th>Mødetid</th>${hoved}${B ? hoved + '<th>Forskel areal</th>' : ''}</tr></thead><tbody>`;
+  RES.tider.forEach((t, i) => {
+    h += `<tr><td><span class="sw" style="background:${farveFor(i).fyld}"></span>≤ ${fmt(t, t % 1 ? 1 : 0)} min</td>` + kol(A, i);
+    if (B) {
+      const d = A.areal[i] ? (B.areal[i] - A.areal[i]) / A.areal[i] * 100 : null;
+      h += kol(B, i) + `<td class="${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}">${d == null ? '–' : (d > 0 ? '+' : '') + fmt(d, 0) + ' %'}</td>`;
+    }
+    h += '</tr>';
+  });
+  h += '</tbody></table></div>';
+  h += `<p class="hint" style="margin-top:6px">Mødetid = ${fmt(Number(S.klar) || 0, 2)} min til bilen kører + køretid + ${fmt(Number(S.parkering) || 0, 2)} min fra parkering. Almindelige færdselsregler, ${fmt(Number(S.fartPct) || 100, 0)} % af hastighedsgrænsen. Trafik A: ${esc(A.per.navn)}${B ? ` · Trafik B: ${esc(B.per.navn)}` : ''}. "Som cirkel" er radius i en cirkel med samme areal; "Længst væk" er luftlinje til nærmeste station.${harAdr ? ' Adresser omfatter også erhverv.' : ''}</p>`;
+  $('resIndhold').innerHTML = h;
+}
+
+/* Tæl adresser inden for kurverne (henter adressepunkter fra OpenStreetMap) */
+async function taelAdresser() {
+  if (!RES || travl) return;
+  travl = true; afbryd = new AbortController(); visTravl(true);
+  try {
+    if (!ADRESSER) {
+      // Felter der dækker alle kurver
+      const fl = Object.values(RES.scen).map(s => s.kumulativ.filter(Boolean).pop()).filter(Boolean);
+      const bb = turf.bbox(turf.featureCollection(fl)); // [vest, syd, øst, nord]
+      const el = await hentFelter(felterIFirkant(bb), 'adr', adresseForespoergsel, afbryd.signal, 'Henter adresser fra OpenStreetMap');
+      ADRESSER = el.filter(e => isFinite(e.lat) && isFinite(e.lon)).map(e => [e.lat, e.lon]);
+    }
+    anvendAdresser(); visResultater();
+    status(`Talte ${fmt(ADRESSER.length, 0)} adressepunkter i området – se kolonnen Adresser.`, 'ok');
+  } catch (e) { status(e.message, e.stop ? 'adv' : 'fejl'); }
+  finally { travl = false; afbryd = null; visTravl(false); }
+}
+function anvendAdresser() {
+  for (const sc of Object.values(RES.scen)) {
+    const n = RES.tider.map(() => 0);
+    for (const [la, lo] of ADRESSER) { const t = tidVedPunkt(sc.gr, la, lo); RES.tider.forEach((m, i) => { if (t <= m) n[i]++; }); }
+    sc.adresser = n;
+  }
+}
+
+
+/* ======================================================================
+   DEL 8 – EKSPORT: GeoJSON, PNG og PDF
+   ====================================================================== */
+function hentFil(blob, navn) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = navn;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+function kraevResultat() { if (!RES) { status('Beregn kørekurverne først.', 'fejl'); return false; } return true; }
+
+function eksGeoJSON() {
+  if (!kraevResultat()) return;
+  const feats = [];
+  for (const [n, sc] of Object.entries(RES.scen)) {
+    sc.kumulativ.forEach((f, i) => {
+      if (!f) return;
+      feats.push({ type: 'Feature', geometry: f.geometry, properties: {
+        scenarie: n, tidspunkt: scenTekst(sc.sc), trafik: sc.per.navn,
+        areal_km2: Math.round(sc.areal[i] * 100) / 100,
+        adresser: sc.adresser ? sc.adresser[i] : null,
+        indbyggere_skoen: sc.adresser ? Math.round(sc.adresser[i] * S.personerPrAdresse) : null,
+        moedetid_min: RES.tider[i], laengst_vaek_km: Math.round(sc.laengst[i] * 100) / 100,
+        regler: 'almindelige faerdselsregler', klar_min: Number(S.klar) || 0, parkering_min: Number(S.parkering) || 0, fill: farveFor(i).fyld
+      } });
+    });
+  }
+  RES.stationer.forEach(s => feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lon, s.lat] }, properties: { type: 'brandstation', navn: s.navn } }));
+  S.bopaele.forEach(b => {
+    const p = { type: 'bopael', navn: b.navn };
+    for (const [n, sc] of Object.entries(RES.scen)) { const x = bopaelTid(sc, b.lat, b.lon); p['moedetid_' + n + '_min'] = x && x.t != null ? Math.round(x.t * 100) / 100 : null; }
+    feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [b.lon, b.lat] }, properties: p });
+  });
+  S.sparringer.forEach(s => feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lon, s.lat] }, properties: { type: s.type === 'lukket' ? 'lukket vej' : 'vejarbejde', radius_m: s.radius, nedsat_pct: s.type === 'lukket' ? null : s.fald, note: s.note || '' } }));
+  hentFil(new Blob([JSON.stringify({ type: 'FeatureCollection', name: 'modetid', features: feats })], { type: 'application/geo+json' }), `modetid-${datoStempel()}.geojson`);
+  status('GeoJSON gemt.', 'ok');
+}
+
+// Tegner et kort som billede (baggrundsfliser + kurver + legende), så det kan gemmes.
+function hentBillede(url) {
+  return new Promise(r => { const im = new Image(); im.crossOrigin = 'anonymous'; const t = setTimeout(() => r(null), 10000); im.onload = () => { clearTimeout(t); r(im); }; im.onerror = () => { clearTimeout(t); r(null); }; im.src = url; });
+}
+async function kortTilCanvas(m, scen, overlayB) {
+  const sc = 2, sz = m.getSize(), W = sz.x * sc, H = sz.y * sc;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const c = cv.getContext('2d'); c.fillStyle = '#e4e8e6'; c.fillRect(0, 0, W, H);
+  const z = m.getZoom(), pb = m.getPixelBounds(), k = KORTLAG[S.kort] || KORTLAG.lys, nT = 2 ** z;
+  const jobs = [];
+  for (let tx = Math.floor(pb.min.x / 256); tx <= Math.floor(pb.max.x / 256); tx++) {
+    for (let ty = Math.floor(pb.min.y / 256); ty <= Math.floor(pb.max.y / 256); ty++) {
+      if (ty < 0 || ty >= nT) continue;
+      const wx = ((tx % nT) + nT) % nT;
+      const url = k.url.replace('{s}', (k.sub || 'a')[0]).replace('{z}', z).replace('{x}', wx).replace('{y}', ty).replace('{r}', k.retina ? '@2x' : '');
+      jobs.push(hentBillede(url).then(im => { if (im) c.drawImage(im, (tx * 256 - pb.min.x) * sc, (ty * 256 - pb.min.y) * sc, 256 * sc, 256 * sc); }));
+    }
+  }
+  await Promise.all(jobs);
+  const tegnF = (f, st) => {
+    if (!f) return;
+    const g = f.geometry, polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+    c.beginPath();
+    for (const p of polys) for (const ring of p) ring.forEach(([lo, la], j) => { const q = m.latLngToContainerPoint([la, lo]); j ? c.lineTo(q.x * sc, q.y * sc) : c.moveTo(q.x * sc, q.y * sc); });
+    if (st.fyld) { c.globalAlpha = 0.34; c.fillStyle = st.fyld; c.fill('evenodd'); c.globalAlpha = 1; }
+    c.lineWidth = st.bredde * sc; c.strokeStyle = st.streg; c.setLineDash(st.stiplet ? [7 * sc, 5 * sc] : []); c.stroke(); c.setLineDash([]);
+  };
+  scen.baand.forEach((f, i) => tegnF(f, { fyld: farveFor(i).fyld, streg: farveFor(i).streg, bredde: 1.2 }));
+  if (overlayB) for (let i = overlayB.kumulativ.length - 1; i >= 0; i--) tegnF(overlayB.kumulativ[i], { streg: farveFor(i).streg, bredde: 2.6, stiplet: true });
+  // Spærringer og stationer
+  for (const s of S.sparringer) {
+    const q = m.latLngToContainerPoint([s.lat, s.lon]), mpp = 40075016 * Math.cos(s.lat * Math.PI / 180) / (256 * nT);
+    c.beginPath(); c.arc(q.x * sc, q.y * sc, Math.max(4, s.radius / mpp) * sc, 0, Math.PI * 2);
+    c.fillStyle = s.type === 'lukket' ? 'rgba(179,38,30,.35)' : 'rgba(217,138,0,.35)'; c.fill();
+    c.strokeStyle = s.type === 'lukket' ? '#b3261e' : '#d98a00'; c.lineWidth = 2 * sc; c.stroke();
+  }
+  S.bopaele.forEach((b, i) => {
+    const q = m.latLngToContainerPoint([b.lat, b.lon]);
+    c.beginPath(); c.arc(q.x * sc, q.y * sc, 10 * sc, 0, Math.PI * 2); c.fillStyle = '#1b2124'; c.fill(); c.strokeStyle = '#fff'; c.lineWidth = 2 * sc; c.stroke();
+    c.fillStyle = '#fff'; c.font = `bold ${11 * sc}px Arial`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(String(i + 1), q.x * sc, q.y * sc + sc);
+  });
+  RES.stationer.forEach((s, i) => {
+    const q = m.latLngToContainerPoint([s.lat, s.lon]), r = 12 * sc;
+    c.fillStyle = '#c42a1f'; c.strokeStyle = '#fff'; c.lineWidth = 2 * sc;
+    c.fillRect(q.x * sc - r, q.y * sc - r, 2 * r, 2 * r); c.strokeRect(q.x * sc - r, q.y * sc - r, 2 * r, 2 * r);
+    c.fillStyle = '#fff'; c.font = `bold ${13 * sc}px Arial`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(String(i + 1), q.x * sc, q.y * sc + sc);
+  });
+  // Legende
+  const rows = [{ titel: (overlayB ? 'A: ' : '') + scenTekst(scen.sc) }, ...RES.tider.map((t, i) => ({ t, i }))];
+  if (overlayB) rows.push({ titel: 'B: ' + scenTekst(overlayB.sc) }, ...RES.tider.map((t, i) => ({ t, i, b: true })));
+  const lh = 18 * sc, lw = 190 * sc, lx = 12 * sc, ly = H - (rows.length * lh + 18 * sc) - 12 * sc;
+  c.fillStyle = 'rgba(255,255,255,.93)'; c.fillRect(lx, ly, lw, rows.length * lh + 14 * sc);
+  c.strokeStyle = '#c9cfcd'; c.lineWidth = sc; c.strokeRect(lx, ly, lw, rows.length * lh + 14 * sc);
+  c.textAlign = 'left'; c.textBaseline = 'middle';
+  rows.forEach((r, j) => {
+    const y = ly + 8 * sc + j * lh + lh / 2;
+    if (r.titel) { c.fillStyle = '#1b2124'; c.font = `bold ${12 * sc}px Arial`; c.fillText(r.titel, lx + 10 * sc, y); return; }
+    const f = farveFor(r.i);
+    if (r.b) { c.strokeStyle = f.streg; c.lineWidth = 2.6 * sc; c.setLineDash([5 * sc, 3 * sc]); c.beginPath(); c.moveTo(lx + 10 * sc, y); c.lineTo(lx + 30 * sc, y); c.stroke(); c.setLineDash([]); }
+    else { c.globalAlpha = .6; c.fillStyle = f.fyld; c.fillRect(lx + 10 * sc, y - 6 * sc, 20 * sc, 12 * sc); c.globalAlpha = 1; }
+    c.fillStyle = '#1b2124'; c.font = `${12 * sc}px Arial`; c.fillText(`≤ ${String(r.t).replace('.', ',')} min`, lx + 38 * sc, y);
+  });
+  c.font = `${10 * sc}px Arial`; c.textAlign = 'right'; c.fillStyle = 'rgba(255,255,255,.85)';
+  const at = k.attr; const aw = c.measureText(at).width + 10 * sc; c.fillRect(W - aw, H - 16 * sc, aw, 16 * sc);
+  c.fillStyle = '#333'; c.fillText(at, W - 5 * sc, H - 8 * sc);
+  return cv;
+}
+async function billederTilEksport() {
+  const A = RES.scen.A, B = S.sammenlign ? RES.scen.B : null;
+  if (B && S.visning === 'side') return [await kortTilCanvas(kortA, A, null), await kortTilCanvas(kortB, B, null)];
+  return [await kortTilCanvas(kortA, A, B && S.visning === 'overlay' ? B : null)];
+}
+async function eksPNG() {
+  if (!kraevResultat()) return;
+  status('Laver billede …');
+  try {
+    const cvs = await billederTilEksport();
+    let cv = cvs[0];
+    if (cvs.length > 1) { cv = document.createElement('canvas'); cv.width = cvs[0].width * 2 + 8; cv.height = cvs[0].height; const c = cv.getContext('2d'); c.fillStyle = '#fff'; c.fillRect(0, 0, cv.width, cv.height); c.drawImage(cvs[0], 0, 0); c.drawImage(cvs[1], cvs[0].width + 8, 0); }
+    cv.toBlob(b => { hentFil(b, `modetid-${datoStempel()}.png`); status('PNG gemt.', 'ok'); }, 'image/png');
+  } catch (e) { status('Billedet kunne ikke laves: ' + e.message, 'fejl'); }
+}
+async function eksPDF() {
+  if (!kraevResultat()) return;
+  if (!window.jspdf) { status('PDF-modulet er ikke indlæst. Tjek internetforbindelsen og genindlæs siden.', 'fejl'); return; }
+  status('Laver PDF-rapport …');
+  try {
+    const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const A = RES.scen.A, B = S.sammenlign ? RES.scen.B : null, M = 12;
+    const overskrift = (t, y) => { doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.text(t, M, y); };
+    overskrift('Mødetid – hvor kan deltidsbrandfolk bo?', 16);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
+    doc.text(doc.splitTextToSize(`Beregnet ${RES.tidspunkt.toLocaleString('da-DK')} · Mødetid = ${String(Number(S.klar) || 0).replace('.', ',')} min til bilen kører + køretid + ${String(Number(S.parkering) || 0).replace('.', ',')} min fra parkering · almindelige færdselsregler · Stationer: ${RES.stationer.map(s => s.navn).join(', ')}`, 297 - 24)[0], M, 22);
+    doc.setTextColor(0);
+    const cvs = await billederTilEksport();
+    const maxH = 150;
+    if (cvs.length > 1) {
+      const w = (297 - 2 * M - 6) / 2, h = Math.min(maxH, w * cvs[0].height / cvs[0].width);
+      doc.addImage(cvs[0].toDataURL('image/jpeg', 0.88), 'JPEG', M, 27, w, h);
+      doc.addImage(cvs[1].toDataURL('image/jpeg', 0.88), 'JPEG', M + w + 6, 27, w, h);
+      doc.setFontSize(9); doc.text('A: ' + scenTekst(A.sc), M, 27 + h + 5); doc.text('B: ' + scenTekst(B.sc), M + w + 6, 27 + h + 5);
+      tabelPDF(doc, M, 27 + h + 12, A, B);
+    } else {
+      let w = 180, h = w * cvs[0].height / cvs[0].width; if (h > 170) { h = 170; w = h * cvs[0].width / cvs[0].height; }
+      doc.addImage(cvs[0].toDataURL('image/jpeg', 0.88), 'JPEG', M, 27, w, h);
+      tabelPDF(doc, M + w + 6, 30, A, B, 297 - M - (M + w + 6));
+    }
+    // Side 2: forudsætninger
+    doc.addPage(); overskrift('Forudsætninger', 16);
+    let y = 25; doc.setFontSize(10);
+    const linje = (t, b = false) => { doc.setFont('helvetica', b ? 'bold' : 'normal'); const l = doc.splitTextToSize(t, 297 - 2 * M); doc.text(l, M, y); y += l.length * 4.6 + (b ? 1 : 0); };
+    linje('Mødetider (fra alarm til fremmøde): ' + RES.tider.map(t => String(t).replace('.', ',') + ' min').join(', '));
+    linje(`Fra alarm til bilen kører: ${String(Number(S.klar) || 0).replace('.', ',')} min · fra parkering til fremmøde: ${String(Number(S.parkering) || 0).replace('.', ',')} min`);
+    linje('Længst væk i luftlinje (A): ' + RES.tider.map((t, i) => `${String(t).replace('.', ',')} min: ${fmt(A.laengst[i], 1)} km`).join(' · ') + (B ? ' · (B): ' + RES.tider.map((t, i) => `${String(t).replace('.', ',')} min: ${fmt(B.laengst[i], 1)} km`).join(' · ') : ''));
+    linje(`Scenarie A: ${scenTekst(A.sc)} – trafik ${A.per.navn}` + (B ? ` · Scenarie B: ${scenTekst(B.sc)} – trafik ${B.per.navn}` : ''));
+    linje(`Almindelige færdselsregler: kørsel med ${Number(S.fartPct) || 100} % af hastighedsgrænsen, ensretning og svingforbud overholdes · Skiltet hastighed fra OpenStreetMap: ${S.brugOsmHastighed ? 'ja' : 'nej'}`);
+    y += 2; linje('Hastigheder (km/t)', true);
+    VEJTYPER.forEach(v => linje(`${VEJTYPE_NAVN[v]}: uden skilt ${S.vej[v].normal}` +
+      ` · belastningsgrad A ${fmt(A.per.B[v], 2)}` + (B ? `, B ${fmt(B.per.B[v], 2)}` : '') + ` (myldretid ${fmt(S.trafik.spids[v], 2)})`));
+    y += 2; linje('Kryds og trafik', true);
+    linje(`Grundtid uden trafik: lyskryds ${S.krydsGrund.signal} sek. · rundkørsel ${S.krydsGrund.rundkorsel} sek. · vigepligt ${S.krydsGrund.kryds} sek.`);
+    linje(`Trafikkens påvirkning efter Vejdirektoratets Håndbog Kapacitet og serviceniveau (2024): døgnprofil (fig. 10.5), hastighedskurver (fig. 4.20-4.22) og middelforsinkelse i kryds (fig. 5.4, 6.4, 7.1). Bilen får hele forsinkelsen som almindelig trafik.`);
+    if (S.bopaele.length) {
+      y += 2; linje('Testede bopæle', true);
+      S.bopaele.forEach((b, i) => { const a = bopaelTid(A, b.lat, b.lon), bb = B ? bopaelTid(B, b.lat, b.lon) : null;
+        const t = x => !x ? '–' : x.over ? `over ${RES.soegT} min` : x.t != null ? tidTekst(x.t) + ' min' : 'ingen vej';
+        linje(`${i + 1}. ${b.navn}: A ${t(a)}` + (B ? ` · B ${t(bb)}` : '')); });
+    }
+    if (S.sparringer.length) { y += 2; linje('Spærringer og vejarbejde', true); S.sparringer.forEach(s => linje(`${s.type === 'lukket' ? 'Lukket vej' : 'Vejarbejde -' + s.fald + ' %'} ved ${s.lat.toFixed(5)}, ${s.lon.toFixed(5)} (radius ${s.radius} m)${s.note ? ' – ' + s.note : ''}`)); }
+    y += 2; linje('Metode', true);
+    linje('Vejnettet er hentet fra OpenStreetMap. For hvert vejstykke beregnes en fart ud fra vejtype, skiltet hastighed, trafikbelastning og eventuelt vejarbejde. Den hurtigste rute fra hvert punkt ind til nærmeste station findes med Dijkstras algoritme, hvor ensretning og registrerede svingforbud overholdes, og der lægges tid til i kryds. Områder inden for ' + S.beregning.vejbuffer + ' m af en nåelig vej medregnes. Kurverne er tegnet på et net med ca. ' + Math.round(A.gr.celle) + ' m opløsning. Indbyggertal er et skøn (adresser × ' + String(S.personerPrAdresse).replace('.', ',') + ').');
+    linje('Kortdata © OpenStreetMap-bidragydere (ODbL).');
+    doc.save(`modetid-${datoStempel()}.pdf`);
+    status('PDF gemt.', 'ok');
+  } catch (e) { console.error(e); status('PDF kunne ikke laves: ' + e.message, 'fejl'); }
+}
+function tabelPDF(doc, x, y, A, B, bredde) {
+  const harAdr = A.adresser != null;
+  const kol = ['Køretid', 'A km²'];
+  if (harAdr) kol.push('A adr.', 'A indb.');
+  if (B) { kol.push('B km²'); if (harAdr && B.adresser) kol.push('B adr.', 'B indb.'); }
+  const cw = bredde ? Math.min(22, bredde / kol.length) : 24;
+  doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+  kol.forEach((k, i) => doc.text(k, x + i * cw + (i ? cw - 2 : 0), y, { align: i ? 'right' : 'left' }));
+  doc.setDrawColor(180); doc.line(x, y + 1.5, x + kol.length * cw, y + 1.5);
+  doc.setFont('helvetica', 'normal');
+  const n = v => v == null ? '–' : Math.round(v).toLocaleString('da-DK');
+  RES.tider.forEach((t, i) => {
+    const yy = y + 6 + i * 5.5;
+    const vals = ['Inden for ' + String(t).replace('.', ',') + ' min', fmt(A.areal[i], 1)];
+    if (harAdr) vals.push(n(A.adresser[i]), n(A.adresser[i] * S.personerPrAdresse));
+    if (B) { vals.push(fmt(B.areal[i], 1)); if (harAdr && B.adresser) vals.push(n(B.adresser[i]), n(B.adresser[i] * S.personerPrAdresse)); }
+    const f = farveFor(i).fyld; doc.setFillColor(f); doc.rect(x, yy - 3, 2.5, 3.5, 'F');
+    vals.forEach((v, j) => doc.text(v, x + j * cw + (j ? cw - 2 : 4), yy, { align: j ? 'right' : 'left' }));
+  });
+}
+
+
+/* ======================================================================
+   DEL 9 – START
+   ====================================================================== */
+fyldDage();
+renderAlt();
+</script>
+</body>
+</html>
