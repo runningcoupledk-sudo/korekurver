@@ -317,7 +317,8 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
               <option value="osm">OpenStreetMap standard</option>
             </select>
           </label>
-          <p class="hint">Lad søgeradius stå tom for automatisk valg. Stor radius i tætte byområder giver mange data og længere ventetid.</p>
+          <p class="hint">Lad søgeradius stå tom for automatisk valg – så udvides området selv, hvis kurven når kanten. Hentet vejnet gemmes i browseren i 30 dage, så næste beregning i samme område går hurtigt.</p>
+          <div class="knap-raekke"><button class="knap lille" data-act="ryd-cache">Hent vejnettet forfra (ryd mellemlager)</button></div>
         </div>
       </details>
 
@@ -351,6 +352,8 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
           <p>Programmet henter alle veje omkring stationen fra OpenStreetMap og regner ud, hvor hurtigt brandbilen kan køre på hvert enkelt vejstykke. Derefter finder det – ligesom en GPS – den hurtigste vej fra stationen ud til alle punkter i vejnettet. Til sidst tegnes en kurve rundt om alt, der kan nås inden for 5, 10 og 15 minutter.</p>
           <h3>Afgangstid</h3>
           <p>Hver station har sin egen afgangstid på 1–7 minutter – tiden fra alarm, til bilen kører ud. Den lægges til, før køretiden begynder. Med flere stationer bruges den station, der samlet er hurtigst fremme, så en nærliggende deltidsstation kan blive overhalet af en heltidsstation længere væk.</p>
+          <h3>Hentning af vejnet</h3>
+          <p>Vejnettet hentes fra OpenStreetMaps gratis servere i felter på ca. 9 × 9 km. Første gang i et område tager det typisk ½–2 minutter, og du kan følge fremdriften nederst i panelet. Felterne gemmes i browseren i 30 dage, så næste beregning går hurtigt. Svarer en server ikke inden for 90 sekunder, prøver programmet automatisk en anden.</p>
           <h3>Fart på hvert vejstykke</h3>
           <ul>
             <li>Udgangspunkt: skiltet hastighed fra OpenStreetMap, ellers "Normal" for vejtypen.</li>
@@ -376,6 +379,7 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
 
     <div class="side-fod">
       <button class="beregn" id="beregnKnap">Beregn kørekurver</button>
+      <button class="knap" id="stopKnap" hidden>Afbryd</button>
       <div class="status" id="status" role="status" aria-live="polite">Klar. Tryk "Beregn kørekurver" for at hente vejnettet og regne.</div>
     </div>
   </aside>
@@ -992,9 +996,15 @@ function renderSparringer() {
 
 function opdaterRadiusHint() {
   const maxT = Math.max(...S.tider, 1);
-  $('radiusFelt').placeholder = `auto (${autoRadius(maxT).toFixed(0)} km)`;
+  $('radiusFelt').placeholder = `auto (ca. ${autoRadius(maxT).toFixed(0)} km)`;
 }
-function autoRadius(maxT) { return Math.min(40, Math.max(3, maxT * 1.4)); }
+// Automatisk søgeradius: køretid (efter korteste afgangstid) × ca. 78 km/t i luftlinje + 1 km.
+// Når kurven alligevel ud til kanten, udvides området automatisk under beregningen.
+function autoRadius(maxT, stationer) {
+  const st = (stationer || S.stationer).filter(s => s.aktiv);
+  const afg = st.length ? Math.min(...st.map(s => afgangstid(s.afgang))) : AFGANG_MIN;
+  return Math.min(40, Math.max(3, Math.max(maxT - afg, 1) * 1.3 + 1));
+}
 
 function opdaterLayout() {
   const side = S.sammenlign && S.visning === 'side' && !!(RES && RES.scen.B);
@@ -1082,7 +1092,7 @@ $('side').addEventListener('change', e => {
     if (el.value === '') v = null; else { v = Number(String(el.value).replace(',', '.')); if (!isFinite(v)) return; }
   } else v = el.value;
   saetSti(S, k, v); gem();
-  if (k.startsWith('stationer')) { renderStationer(); }
+  if (k.startsWith('stationer')) { renderStationer(); opdaterRadiusHint(); }
   if (k.startsWith('sparringer')) { tegnSparringer(); }
   if (k.startsWith('scen') || k.startsWith('perioder') || k === 'sammenlign') renderPeriodeVisning();
   if (k === 'kort') saetBaggrund();
@@ -1115,6 +1125,7 @@ document.addEventListener('click', async e => {
     case 'eks-png': eksPNG(); return;
     case 'eks-pdf': eksPDF(); return;
     case 'tael-adresser': taelAdresser(); return;
+    case 'ryd-cache': await lagerRyd(); G = null; CACHE = null; ADRESSER = null; status('Mellemlageret er ryddet. Næste beregning henter vejnettet forfra.', 'ok'); return;
     default: return;
   }
   gem(); markerForaeldet();
@@ -1156,40 +1167,195 @@ const datoStempel = () => new Date().toISOString().slice(0, 10);
 /* ======================================================================
    DEL 6 – HENT VEJNET OG REGN
    ====================================================================== */
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
-async function overpass(q) {
-  let sidste;
-  for (const url of OVERPASS) {
-    try {
-      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-      if (!r.ok) throw new Error(r.status === 429 ? 'for mange forespørgsler – vent et minut' : r.status === 504 ? 'serveren havde for travlt' : 'HTTP ' + r.status);
-      return await r.json();
-    } catch (e) { sidste = e; }
-  }
-  throw new Error('Kunne ikke hente data fra OpenStreetMap (' + (sidste ? sidste.message : 'ukendt fejl') + '). Prøv igen, eller gør søgeradius mindre.');
+/* Vejnettet hentes fra de gratis Overpass-servere i felter på ca. 9 × 9 km.
+   Små forespørgsler er langt hurtigere og mere stabile end én stor.
+   Hvert felt gemmes i browseren i 30 dage, så næste beregning går hurtigt. */
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+const NET = { svarGraense: 90000, samtidige: 2, pause: 4000 }; // ventetid pr. forespørgsel (ms), felter ad gangen
+const FELT_LAT = 0.08, FELT_LON = 0.14;   // feltstørrelse i grader (≈ 8,9 × 8,8 km i Danmark)
+const MELLEMLAGER_DAGE = 30;
+let afbryd = null;                       // bruges af knappen "Afbryd"
+let godServer = 0;                       // den server, der senest svarede – prøves først næste gang
+
+function stopFejl() { const e = new Error('Beregningen blev afbrudt.'); e.stop = true; return e; }
+function vent(ms, signal) {
+  return new Promise((ok, fejl) => {
+    const t = setTimeout(ok, ms);
+    signal?.addEventListener('abort', () => { clearTimeout(t); fejl(stopFejl()); }, { once: true });
+  });
 }
-function vejForespoergsel(stationer, R, service) {
-  const hw = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street';
-  const dele = stationer.map(s => {
-    const om = `(around:${Math.round(R)},${s.lat.toFixed(6)},${s.lon.toFixed(6)})`;
-    return `way["highway"~"^(${hw})$"]["area"!="yes"]${om};` + (service ? `way["highway"="service"]["service"!~"^(parking_aisle|driveway|drive-through)$"]["area"!="yes"]${om};` : '');
-  }).join('');
-  return `[out:json][timeout:300][maxsize:1073741824];(${dele})->.w;.w out geom qt;node(w.w)["highway"="traffic_signals"];out skel qt;rel(bw.w)["type"="restriction"];out body qt;`;
+
+// Sender én forespørgsel. Prøver næste server, hvis en er langsom, optaget eller giver fejl.
+async function overpass(q, signal) {
+  let sidste = null;
+  for (let forsoeg = 0; forsoeg < OVERPASS.length * 2; forsoeg++) {
+    if (signal?.aborted) throw stopFejl();
+    const nr = (godServer + forsoeg) % OVERPASS.length, url = OVERPASS[nr];
+    const ac = new AbortController();
+    let forSent = false;
+    const timer = setTimeout(() => { forSent = true; ac.abort(); }, NET.svarGraense);
+    const stop = () => ac.abort();
+    signal?.addEventListener('abort', stop);
+    try {
+      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ac.signal });
+      if (r.status === 429 || r.status === 503 || r.status === 504) {
+        sidste = new Error(r.status === 429 ? 'serverne er optaget' : 'serveren havde for travlt');
+        clearTimeout(timer);
+        await vent(NET.pause * (forsoeg < OVERPASS.length ? 1 : 2), signal);
+        continue;
+      }
+      if (!r.ok) throw new Error('HTTP-fejl ' + r.status);
+      const d = await r.json();
+      // Overpass svarer "200 OK" med halve data, hvis den løber tør for tid – det må ikke bruges
+      if (d.remark && /runtime error|timed out|out of memory/i.test(d.remark)) throw new Error('serveren nåede ikke at blive færdig');
+      godServer = nr;
+      return d;
+    } catch (e) {
+      if (signal?.aborted) throw stopFejl();
+      sidste = forSent ? new Error(`serveren svarede ikke inden for ${Math.round(NET.svarGraense / 1000)} sekunder`) : e;
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', stop); }
+  }
+  throw new Error('Kunne ikke hente data fra OpenStreetMap (' + (sidste ? sidste.message : 'ukendt fejl') + '). Vent et minut og prøv igen.');
+}
+
+/* Mellemlager i browseren (IndexedDB). Virker det ikke, hentes data bare hver gang. */
+let dbLover = null;
+function aabnLager() {
+  if (!dbLover) dbLover = new Promise(ok => {
+    try {
+      const r = indexedDB.open('korekurver-mellemlager', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('felter');
+      r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); r.onblocked = () => ok(null);
+    } catch (e) { ok(null); }
+  });
+  return dbLover;
+}
+async function lagerHent(noegle) {
+  const db = await aabnLager(); if (!db) return null;
+  return new Promise(ok => {
+    try {
+      const r = db.transaction('felter').objectStore('felter').get(noegle);
+      r.onsuccess = () => { const v = r.result; ok(v && Date.now() - v.t < MELLEMLAGER_DAGE * 864e5 ? v.d : null); };
+      r.onerror = () => ok(null);
+    } catch (e) { ok(null); }
+  });
+}
+async function lagerGem(noegle, d) {
+  const db = await aabnLager(); if (!db) return;
+  try { db.transaction('felter', 'readwrite').objectStore('felter').put({ t: Date.now(), d }, noegle); } catch (e) {}
+}
+async function lagerRyd() {
+  const db = await aabnLager(); if (!db) return;
+  await new Promise(ok => { try { const t = db.transaction('felter', 'readwrite'); t.objectStore('felter').clear(); t.oncomplete = ok; t.onerror = ok; } catch (e) { ok(); } });
+}
+
+// Hvilke felter skal hentes for at dække en cirkel med radius R (meter) om hver station?
+function felterOmStationer(stationer, R) {
+  const ud = new Map();
+  for (const s of stationer) {
+    const dLat = R / 110574, dLon = R / (111320 * Math.cos(s.lat * Math.PI / 180));
+    for (let i = Math.floor((s.lat - dLat) / FELT_LAT); i <= Math.floor((s.lat + dLat) / FELT_LAT); i++) {
+      for (let j = Math.floor((s.lon - dLon) / FELT_LON); j <= Math.floor((s.lon + dLon) / FELT_LON); j++) {
+        const f = feltFra(i, j);
+        const la = Math.max(f.s, Math.min(f.n, s.lat)), lo = Math.max(f.w, Math.min(f.e, s.lon));
+        if (afstand(s.lat, s.lon, la, lo) <= R) ud.set(f.id, f);
+      }
+    }
+  }
+  return [...ud.values()];
+}
+function felterIFirkant(bb) { // bb = [vest, syd, øst, nord]
+  const ud = [];
+  for (let i = Math.floor(bb[1] / FELT_LAT); i <= Math.floor(bb[3] / FELT_LAT); i++)
+    for (let j = Math.floor(bb[0] / FELT_LON); j <= Math.floor(bb[2] / FELT_LON); j++) ud.push(feltFra(i, j));
+  return ud;
+}
+function feltFra(i, j) {
+  const s = i * FELT_LAT, w = j * FELT_LON;
+  return { id: i + '_' + j, s, w, n: s + FELT_LAT, e: w + FELT_LON, bb: `(${s.toFixed(5)},${w.toFixed(5)},${(s + FELT_LAT).toFixed(5)},${(w + FELT_LON).toFixed(5)})` };
+}
+
+const VEJE_HW = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street';
+function vejForespoergsel(f, service) {
+  return `[out:json][timeout:80];(way["highway"~"^(${VEJE_HW})$"]["area"!="yes"]${f.bb};` +
+    (service ? `way["highway"="service"]["service"!~"^(parking_aisle|driveway|drive-through)$"]["area"!="yes"]${f.bb};` : '') +
+    `)->.w;.w out geom qt;node(w.w)["highway"="traffic_signals"];out skel qt;rel(bw.w)["type"="restriction"];out body qt;`;
+}
+function adresseForespoergsel(f) {
+  return `[out:json][timeout:80];node["addr:housenumber"]${f.bb};out skel qt;way["addr:housenumber"]${f.bb};out ids center qt;`;
+}
+
+// Fjerner alt, programmet ikke bruger – så fylder data mindre i hukommelsen og i mellemlageret
+const BEHOLD_VEJ = ['highway', 'maxspeed', 'oneway', 'junction', 'area'];
+function slank(el) {
+  if (el.type === 'way') {
+    const t = {}; for (const k of BEHOLD_VEJ) if (el.tags && el.tags[k] != null) t[k] = el.tags[k];
+    return { type: 'way', id: el.id, nodes: el.nodes, geometry: el.geometry, tags: t };
+  }
+  if (el.type === 'relation') {
+    const t = {}; for (const k in (el.tags || {})) if (k === 'type' || k === 'except' || k.startsWith('restriction')) t[k] = el.tags[k];
+    return { type: 'relation', id: el.id, tags: t, members: (el.members || []).map(m => ({ type: m.type, ref: m.ref, role: m.role })) };
+  }
+  if (el.center) return { type: el.type, id: el.id, lat: el.center.lat, lon: el.center.lon };
+  return { type: el.type, id: el.id, lat: el.lat, lon: el.lon };
+}
+
+/* Henter en række felter – to ad gangen – og samler dem. Viser fremdrift undervejs. */
+async function hentFelter(felter, slags, lavQ, signal, tekst) {
+  const samlet = new Map();
+  let faerdige = 0, fraLager = 0;
+  const t0 = Date.now();
+  const vis = () => status(`${tekst}: ${faerdige} af ${felter.length} felter (${Math.round((Date.now() - t0) / 1000)} sek.)` +
+    (fraLager ? ` – ${fraLager} fra mellemlageret` : '') + '. Første gang i et område tager typisk ½–2 min.');
+  vis();
+  const ur = setInterval(vis, 1000);
+  const kø = [...felter];
+  const arbejder = async () => {
+    while (kø.length) {
+      const f = kø.shift();
+      const noegle = slags + '|' + f.id;
+      let el = await lagerHent(noegle);
+      if (el) fraLager++;
+      else {
+        const d = await overpass(lavQ(f), signal);
+        el = d.elements.map(slank);
+        lagerGem(noegle, el);
+      }
+      for (const e of el) samlet.set(e.type[0] + e.id, e);
+      faerdige++; vis();
+    }
+  };
+  try { await Promise.all(Array.from({ length: Math.min(NET.samtidige, felter.length) }, arbejder)); }
+  finally { clearInterval(ur); }
+  return [...samlet.values()];
 }
 
 let G = null, CACHE = null, RES = null, ADRESSER = null, travl = false;
 
-async function sikrVejnet(stationer, R) {
-  const ok = CACHE && G && CACHE.service === !!S.beregning.servicevej &&
-    stationer.every(s => CACHE.centre.some(c => afstand(s.lat, s.lon, c.lat, c.lon) + R <= CACHE.R + 1));
-  if (ok) return;
-  status(`Henter vejnet fra OpenStreetMap inden for ${(R / 1000).toFixed(0)} km … det kan tage 10–90 sekunder.`);
-  const data = await overpass(vejForespoergsel(stationer, R, !!S.beregning.servicevej));
-  status('Bygger vejnettet …'); await pause();
-  G = byggGraf(data);
-  if (!G.nS) throw new Error('Der blev ikke fundet nogen veje i området.');
-  CACHE = { centre: stationer.map(s => ({ lat: s.lat, lon: s.lon })), R, service: !!S.beregning.servicevej };
-  ADRESSER = null;
+async function sikrVejnet(stationer, R, signal) {
+  const service = !!S.beregning.servicevej;
+  const felter = felterOmStationer(stationer, R);
+  const mangler = !G || !CACHE || CACHE.service !== service || felter.some(f => !CACHE.felter.has(f.id));
+  if (mangler) {
+    const el = await hentFelter(felter, 'vej' + (service ? 'S' : ''), f => vejForespoergsel(f, service), signal, 'Henter vejnet fra OpenStreetMap');
+    status('Bygger vejnettet …'); await pause();
+    G = byggGraf({ elements: el });
+    if (!G.nS) throw new Error('Der blev ikke fundet nogen veje i området.');
+    CACHE = { felter: new Set(felter.map(f => f.id)), service };
+  }
+  CACHE.centre = stationer.map(s => ({ lat: s.lat, lon: s.lon }));
+  CACHE.R = R;
+}
+
+// Når kurven ud til kanten af det hentede område?
+function naarKanten(res, maxT) {
+  for (let k = 0; k < G.nK; k++) {
+    if (res.knudeT[k] > maxT) continue;
+    let dmin = Infinity;
+    for (const c of CACHE.centre) dmin = Math.min(dmin, afstand(G.lat[k], G.lon[k], c.lat, c.lon));
+    if (dmin > CACHE.R * 0.94) return true;
+  }
+  return false;
 }
 
 async function beregn() {
@@ -1198,52 +1364,68 @@ async function beregn() {
   if (!st.length) { status('Tilføj mindst én aktiv brandstation.', 'fejl'); return; }
   const tider = [...S.tider].sort((a, b) => a - b);
   const maxT = tider[tider.length - 1];
-  travl = true; $('beregnKnap').disabled = true; saetKlikTilstand(klikTilstand);
+  travl = true; afbryd = new AbortController(); visTravl(true); saetKlikTilstand(klikTilstand);
+  const signal = afbryd.signal;
   const advarsler = [];
   try {
-    const R = (Number(S.beregning.radiusKm) > 0 ? Number(S.beregning.radiusKm) : autoRadius(maxT)) * 1000;
-    await sikrVejnet(st, R);
-    const kilder = [];
-    for (const s of st) {
-      const k = naermesteKnude(G, s.lat, s.lon);
-      if (k.idx < 0) throw new Error(`Ingen vej fundet ved ${s.navn}.`);
-      if (k.afstand > 300) advarsler.push(`${s.navn} ligger ${Math.round(k.afstand)} m fra nærmeste vej`);
-      kilder.push({ idx: k.idx, start: afgangstid(s.afgang) });
-      if (afgangstid(s.afgang) >= tider[0]) advarsler.push(`${s.navn} har afgangstid på ${String(afgangstid(s.afgang)).replace('.', ',')} min, så den når intet inden for ${tider[0]} min`);
-    }
+    const auto = !(Number(S.beregning.radiusKm) > 0);
+    let R = (auto ? autoRadius(maxT, st) : Number(S.beregning.radiusKm)) * 1000;
     const scen = [['A', S.scenA]]; if (S.sammenlign) scen.push(['B', S.scenB]);
-    const nyRes = { tider, scen: {}, tidspunkt: new Date(), stationer: st.map(s => ({ ...s })) };
-    for (const [n, sc] of scen) {
-      status(`Regner hurtigste veje for scenarie ${n} (${scenTekst(sc)}) …`); await pause();
-      const per = trafikPeriode(S, sc.dag, sc.tid);
-      const tid = segmentTider(G, S, per.f);
-      const res = korDijkstra(G, kilder, tid, S, per.f, maxT);
-      // Når kurven ud til kanten af det hentede vejnet?
-      let kantRamt = false;
-      for (let k = 0; k < G.nK && !kantRamt; k++) {
-        if (res.knudeT[k] > maxT) continue;
-        let dmin = Infinity;
-        for (const c of CACHE.centre) dmin = Math.min(dmin, afstand(G.lat[k], G.lon[k], c.lat, c.lon));
-        if (dmin > CACHE.R * 0.94) kantRamt = true;
+    let nyRes;
+    // Ved automatisk radius udvides området selv, hvis kurven når ud til kanten (højst to gange)
+    for (let runde = 0; ; runde++) {
+      await sikrVejnet(st, R, signal);
+      const kilder = [];
+      advarsler.length = 0;
+      for (const s of st) {
+        const k = naermesteKnude(G, s.lat, s.lon);
+        if (k.idx < 0) throw new Error(`Ingen vej fundet ved ${s.navn}.`);
+        if (k.afstand > 300) advarsler.push(`${s.navn} ligger ${Math.round(k.afstand)} m fra nærmeste vej`);
+        kilder.push({ idx: k.idx, start: afgangstid(s.afgang) });
+        if (afgangstid(s.afgang) >= tider[0]) advarsler.push(`${s.navn} har afgangstid på ${String(afgangstid(s.afgang)).replace('.', ',')} min, så den når intet inden for ${tider[0]} min`);
       }
-      if (kantRamt) advarsler.push(`scenarie ${n} når ud til kanten af det hentede vejnet – øg søgeradius`);
+      nyRes = { tider, scen: {}, tidspunkt: new Date(), stationer: st.map(s => ({ ...s })) };
+      let kant = [];
+      for (const [n, sc] of scen) {
+        status(`Regner hurtigste veje for scenarie ${n} (${scenTekst(sc)}) …`); await pause();
+        if (signal.aborted) throw stopFejl();
+        const per = trafikPeriode(S, sc.dag, sc.tid);
+        const tid = segmentTider(G, S, per.f);
+        const res = korDijkstra(G, kilder, tid, S, per.f, maxT);
+        if (naarKanten(res, maxT)) kant.push(n);
+        nyRes.scen[n] = { sc: { ...sc }, per, tid, res };
+      }
+      if (!kant.length) break;
+      if (auto && runde < 2 && R < 45000) { R = Math.min(45000, R * 1.35); status(`Kurven når ud til kanten – udvider området til ${(R / 1000).toFixed(0)} km …`); await pause(); continue; }
+      advarsler.push(`scenarie ${kant.join(' og ')} når ud til kanten af det hentede vejnet – øg søgeradius`);
+      break;
+    }
+    for (const [n] of scen) {
       status(`Tegner kurver for scenarie ${n} …`); await pause();
-      const gr = byggGitter(G, res, tid, S, maxT);
+      const x = nyRes.scen[n];
+      const gr = byggGitter(G, x.res, x.tid, S, maxT);
       if (!gr) throw new Error('Brandbilen kan ikke komme nogen steder hen. Tjek spærringer og hastigheder.');
       const k = lavKurver(gr, tider);
-      nyRes.scen[n] = { sc: { ...sc }, per, gr, ...k, areal: k.kumulativ.map(f => f ? turf.area(f) / 1e6 : 0), adresser: null };
+      nyRes.scen[n] = { sc: x.sc, per: x.per, gr, ...k, areal: k.kumulativ.map(f => f ? turf.area(f) / 1e6 : 0), adresser: null };
     }
-    RES = nyRes;
-    if (ADRESSER) anvendAdresser();
+    RES = nyRes; RES.radiusKm = R / 1000;
+    ADRESSER = null;
     opdaterLayout(); tegnResultater(); visResultater();
     const yderst = RES.scen.A.kumulativ.filter(Boolean).pop();
     if (yderst) kortA.fitBounds(L.geoJSON(yderst).getBounds(), { padding: [20, 20] });
     $('taelKnap').disabled = false;
     status(advarsler.length ? 'Færdig – bemærk: ' + advarsler.join('; ') + '.' : 'Færdig.', advarsler.length ? 'adv' : 'ok');
   } catch (e) {
-    console.error(e); status(e.message || String(e), 'fejl');
-  } finally { travl = false; $('beregnKnap').disabled = false; }
+    console.error(e); status(e.message || String(e), e.stop ? 'adv' : 'fejl');
+  } finally { travl = false; afbryd = null; visTravl(false); }
 }
+function visTravl(ja) {
+  $('beregnKnap').disabled = ja;
+  $('beregnKnap').textContent = ja ? 'Beregner …' : 'Beregn kørekurver';
+  $('stopKnap').hidden = !ja;
+  $('taelKnap').disabled = ja || !RES;
+}
+$('stopKnap').onclick = () => { if (afbryd) afbryd.abort(); };
 $('beregnKnap').onclick = beregn;
 
 
@@ -1308,21 +1490,19 @@ function visResultater() {
 /* Tæl adresser inden for kurverne (henter adressepunkter fra OpenStreetMap) */
 async function taelAdresser() {
   if (!RES || travl) return;
-  travl = true; $('taelKnap').disabled = true;
+  travl = true; afbryd = new AbortController(); visTravl(true);
   try {
     if (!ADRESSER) {
-      // Område der dækker alle kurver
+      // Felter der dækker alle kurver
       const fl = Object.values(RES.scen).map(s => s.kumulativ.filter(Boolean).pop()).filter(Boolean);
       const bb = turf.bbox(turf.featureCollection(fl)); // [vest, syd, øst, nord]
-      status('Henter adresser fra OpenStreetMap …');
-      const box = `(${bb[1].toFixed(5)},${bb[0].toFixed(5)},${bb[3].toFixed(5)},${bb[2].toFixed(5)})`;
-      const d = await overpass(`[out:json][timeout:240];node["addr:housenumber"]${box};out skel qt;way["addr:housenumber"]${box};out ids center qt;`);
-      ADRESSER = d.elements.map(e => e.type === 'node' ? [e.lat, e.lon] : (e.center ? [e.center.lat, e.center.lon] : null)).filter(Boolean);
+      const el = await hentFelter(felterIFirkant(bb), 'adr', adresseForespoergsel, afbryd.signal, 'Henter adresser fra OpenStreetMap');
+      ADRESSER = el.filter(e => isFinite(e.lat) && isFinite(e.lon)).map(e => [e.lat, e.lon]);
     }
     anvendAdresser(); visResultater();
     status(`Talte ${fmt(ADRESSER.length, 0)} adressepunkter i området.`, 'ok');
-  } catch (e) { status(e.message, 'fejl'); }
-  finally { travl = false; $('taelKnap').disabled = false; }
+  } catch (e) { status(e.message, e.stop ? 'adv' : 'fejl'); }
+  finally { travl = false; afbryd = null; visTravl(false); }
 }
 function anvendAdresser() {
   for (const sc of Object.values(RES.scen)) {
