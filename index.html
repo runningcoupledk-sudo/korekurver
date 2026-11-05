@@ -98,6 +98,7 @@ table.tab th{font:600 12px var(--f-display);text-transform:uppercase;letter-spac
 table.tab td{padding:3px 4px;border-bottom:1px solid var(--line);vertical-align:middle}
 table.tab td input{padding:4px 5px}
 .tab-wrap{overflow-x:auto}
+table.tab td.tal{font:13px var(--f-mono);font-variant-numeric:tabular-nums;text-align:right;padding-right:8px}
 
 .station{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line)}
 .station .afg{grid-column:2/-1;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
@@ -114,6 +115,9 @@ table.tab td input{padding:4px 5px}
 .periode .dage{display:flex;gap:10px;flex-wrap:wrap;font-size:13px}
 .periode .fak{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
 .periode .fak label{font-size:11px}
+.graf-wrap{border:1px solid var(--line);border-radius:6px;padding:6px 6px 2px;background:var(--field)}
+.graf-wrap svg{display:block;width:100%;height:auto}
+.graf-wrap text{font:10px var(--f-body);fill:var(--muted)}
 .scen-boks{border-left:3px solid var(--line);padding-left:10px;display:flex;flex-direction:column;gap:6px}
 .scen-boks.a{border-color:var(--accent)}
 .scen-navn{font:600 13px var(--f-display);text-transform:uppercase;letter-spacing:.06em}
@@ -256,26 +260,31 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
       <details class="sek">
         <summary>Kryds og ensretning</summary>
         <div class="sek-indhold">
-          <p class="hint">Tid brandbilen mister, hver gang den passerer et kryds. Øges automatisk i myldretid med samme procent som vejtypen.</p>
+          <p class="hint"><b>Grundtid uden anden trafik:</b> den tid brandbilen bruger på at bremse ned og sikre krydset, fx om natten. Ventetid på grund af trafik lægges oven i efter Vejdirektoratets model – se Fremkommelighed.</p>
           <div class="raekke">
-            <label class="f"><span>Lyskryds (sek.)</span><input type="number" min="0" step="1" data-k="forsinkelse.signal" data-t="num"></label>
-            <label class="f"><span>Rundkørsel (sek.)</span><input type="number" min="0" step="1" data-k="forsinkelse.rundkorsel" data-t="num"></label>
-            <label class="f"><span>Andre kryds (sek.)</span><input type="number" min="0" step="1" data-k="forsinkelse.kryds" data-t="num"></label>
+            <label class="f"><span>Lyskryds (sek.)</span><input type="number" min="0" step="1" data-k="krydsGrund.signal" data-t="num"></label>
+            <label class="f"><span>Rundkørsel (sek.)</span><input type="number" min="0" step="1" data-k="krydsGrund.rundkorsel" data-t="num"></label>
+            <label class="f"><span>Vigepligt (sek.)</span><input type="number" min="0" step="1" data-k="krydsGrund.kryds" data-t="num"></label>
           </div>
+          <p class="hint">Vigepligt gælder, når brandbilen kommer fra en mindre vej ud på en større. Kryds på vej med forkørselsret koster det halve.</p>
           <label class="chk"><input type="checkbox" data-k="modEnsretning"> Tillad kørsel mod ensretning på by- og villaveje (halv fart)</label>
           <p class="hint">Ensretning og svingforbud fra OpenStreetMap overholdes altid (undtagen ovenstående valg).</p>
         </div>
       </details>
 
       <details class="sek">
-        <summary>Fremkommelighed <small>trafik pr. tidsrum</small></summary>
+        <summary>Fremkommelighed <small>Vejdirektoratets model</small></summary>
         <div class="sek-indhold">
-          <p class="hint">Hvor mange procent langsommere trafikken kører i hvert tidsrum. Den første periode, der passer på dag og klokkeslæt, bruges. Tallene er udgangspunkter – justér dem efter lokale erfaringer eller GPS-data fra udrykninger.</p>
-          <div id="periodeListe" style="display:flex;flex-direction:column;gap:8px"></div>
-          <div class="knap-raekke">
-            <button class="knap" data-act="ny-periode">+ Tilføj tidsrum</button>
-            <button class="knap" data-act="std-perioder">Gendan standard</button>
+          <p class="hint">Trafikken følger Vejdirektoratets døgnprofil for den valgte dag. Jo tættere en vej er på sin kapacitet, jo langsommere går det – mest i krydsene, mindre på strækningerne.</p>
+          <div class="graf-wrap"><svg id="doegnGraf" viewBox="0 0 360 150" role="img" aria-label="Trafik over døgnet for de fire dagtyper"></svg></div>
+          <div class="tab-wrap">
+            <table class="tab" id="trafikTabel"></table>
           </div>
+          <label class="f"><span>Andel af trafikkens forsinkelse, brandbilen får under udrykning (%)</span>
+            <input type="number" min="0" max="100" step="5" data-k="trafik.andelUdrykning" data-t="num">
+          </label>
+          <p class="hint"><b>Belastningsgrad</b> er trafikken i forhold til vejens kapacitet (1,0 = fuld). <b>Myldretid</b> er den typiske belastning i hverdagens travleste time. Har I trafiktal fra kommunen eller Vejdirektoratet, kan tallene sættes præcist. Andelen ved udrykning er et skøn, der bør kalibreres mod jeres egne udrykningstider.</p>
+          <p class="hint">Kilde: Vejdirektoratet, Håndbog Kapacitet og serviceniveau (2024), figur 4.20–4.22, 5.4, 6.4, 7.1 og 10.5.</p>
         </div>
       </details>
 
@@ -358,13 +367,15 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
           <ul>
             <li>Udgangspunkt: skiltet hastighed fra OpenStreetMap, ellers "Normal" for vejtypen.</li>
             <li>Ved udrykning lægges "Udrykning +" til – men aldrig over "Maks.".</li>
-            <li>Trafikken på det valgte tidspunkt trækker procenten fra (fx byvej −40 % kl. 7–9).</li>
+            <li>Trafikken på det valgte tidspunkt sænker farten lidt – mest på motorveje og hurtige landeveje tæt på kapacitetsgrænsen.</li>
             <li>Vejarbejde trækker yderligere fra. Lukkede veje kan ikke bruges.</li>
           </ul>
           <h3>Kryds, ensretning og svingforbud</h3>
-          <p>Ved hvert kryds lægges den valgte forsinkelse til. Ensrettede veje køres kun den rigtige vej, og registrerede svingforbud (fx "forbudt venstresving") overholdes. Brandbilen laver ikke U-vendinger midt på vejen.</p>
-          <h3>Trafikdata</h3>
-          <p>Der findes ikke frie, åbne historiske hastighedsprofiler for hele Danmark. Programmet bruger derfor procentfaktorer pr. vejtype og tidsrum, som du selv kan justere. Har I GPS-logs fra udrykninger eller trafiktal fra Vejdirektoratet, kan faktorerne kalibreres ud fra dem.</p>
+          <p>Ved hvert kryds lægges en grundtid til, plus ventetid fra trafikken på den vigtigste vej i krydset. Ensrettede veje køres kun den rigtige vej, og registrerede svingforbud (fx "forbudt venstresving") overholdes. Brandbilen laver ikke U-vendinger midt på vejen.</p>
+          <h3>Trafik – Vejdirektoratets model</h3>
+          <p>Trafikken bygger på Vejdirektoratets Håndbog Kapacitet og serviceniveau (2024). Døgnprofilen (figur 10.5) giver trafikken time for time for mandag–torsdag, fredag, lørdag og søn-/helligdag. Ganget med vejens belastning i myldretid giver det en <b>belastningsgrad</b> pr. vejtype.</p>
+          <p>Belastningsgraden bruges to steder. På strækningerne falder farten efter håndbogens hastighedskurver (figur 4.20–4.22), som er næsten flade, indtil vejen nærmer sig kapacitetsgrænsen. I krydsene stiger ventetiden efter håndbogens serviceniveauer (figur 5.4, 6.4 og 7.1). I byen er det derfor krydsene, der koster mest tid i myldretiden.</p>
+          <p>Håndbogens tal gælder almindelige biler. En brandbil under udrykning får kun en del af forsinkelsen, fordi trafikken viger – som standard 50 %. Tallet er et skøn og bør kalibreres mod jeres egne udrykningstider.</p>
           <h3>Areal, adresser og indbyggere</h3>
           <p>Arealet beregnes direkte af kurverne. Adresser tælles ud fra OpenStreetMap (i Danmark er de officielle adresser indlæst). Indbyggere er et <b>skøn</b>: antal adresser × personer pr. adresse. Erhvervsadresser tæller med, så brug tallet med omtanke.</p>
           <h3>Begrænsninger</h3>
@@ -415,7 +426,7 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
 // Vejtyperne, som brugeren kan sætte hastigheder for. Rækkefølgen bruges som nummer (0–3).
 const VEJTYPER = ['motorvej', 'landevej', 'byvej', 'villavej'];
 const VEJTYPE_NAVN = { motorvej: 'Motorvej', landevej: 'Landevej', byvej: 'Byvej', villavej: 'Villavej' };
-const DAGE = { hverdag: 'Hverdag (man–fre)', lordag: 'Lørdag', sondag: 'Søndag/helligdag' };
+const DAGE = { mantor: 'Mandag–torsdag', fredag: 'Fredag', lordag: 'Lørdag', sondag: 'Søndag/helligdag' };
 const UOPNAAET = 1e6; // værdi for "kan ikke nås"
 const AFGANG_MIN = 1, AFGANG_MAX = 7; // tilladte afgangstider (minutter)
 // Sikrer at en afgangstid ligger mellem 1 og 7 minutter
@@ -509,6 +520,9 @@ function byggGraf(data) {
   for (let s = 0; s < nS; s++) udListe[fyld[sFra[s]]++] = s;
 
   const knudeSignal = new Uint8Array(nK);
+  // Den vigtigste vejtype i hvert punkt (0 = motorvej … 3 = villavej) – bruges til vigepligt og trafik i kryds
+  const knudeMinKlasse = new Uint8Array(nK).fill(3);
+  for (let s = 0; s < nS; s++) { const k = sFra[s], c = vejKlasse[sVej[s]]; if (c < knudeMinKlasse[k]) knudeMinKlasse[k] = c; }
   for (const [id, k] of knudeIndeks) if (signalIds.has(id)) knudeSignal[k] = 1;
 
   // Svingforbud: "fra vej X gennem punkt P må man ikke (eller kun) køre ind på vej Y"
@@ -537,27 +551,70 @@ function byggGraf(data) {
     sFra: Int32Array.from(sFra), sTil: Int32Array.from(sTil), sLaengde: Float32Array.from(sLaengde),
     sVej: Int32Array.from(sVej), sMod: Uint8Array.from(sMod),
     vejKlasse: Uint8Array.from(vejKlasse), vejGraense: Float32Array.from(vejGraense), vejRund: Uint8Array.from(vejRund),
-    udStart, udListe, knudeSignal, forbudKort, knudeForbud,
+    udStart, udListe, knudeSignal, knudeMinKlasse, forbudKort, knudeForbud,
     antalVeje: vejKlasse.length
   };
 }
 
-// Finder det tidsrum (trafikperiode), der passer til dag og klokkeslæt.
+/* ---------- TRAFIKMODEL ----------
+   Bygger på Vejdirektoratets "Håndbog Kapacitet og serviceniveau" (marts 2024):
+   - Trafikkens fordeling over døgnet:   figur 10.5 (bolig-arbejdsstedstrafik, fire dagtyper)
+   - Fart på strækninger ved trafik:      figur 4.20–4.22 (hastighed som funktion af belastningsgrad)
+   - Ventetid i kryds ved trafik:         figur 5.4, 6.4 og 7.1 (middelforsinkelse pr. serviceniveau)
+   Håndbogens tal gælder almindelige biler. En brandbil under udrykning får kun en del af
+   forsinkelsen, fordi trafikken viger ("andel ved udrykning"). */
+
+// Timetrafik (køretøjer, begge retninger) aflæst fra figur 10.5 – én værdi pr. time: kl. 0–1, 1–2, …, 23–24
+const DOEGNPROFIL = {
+  mantor: [230, 150, 90, 60, 90, 350, 1000, 1550, 1350, 1100, 1050, 1100, 1150, 1250, 1450, 1700, 1800, 1600, 1150, 850, 650, 550, 400, 250],
+  fredag: [250, 160, 100, 60, 90, 330, 900, 1450, 1200, 1050, 1050, 1150, 1250, 1450, 1700, 1750, 1650, 1350, 1000, 750, 600, 550, 500, 350],
+  lordag: [300, 200, 130, 80, 60, 80, 200, 350, 500, 750, 1000, 1150, 1250, 1200, 1150, 1100, 1050, 950, 800, 650, 600, 550, 500, 400],
+  sondag: [300, 220, 150, 90, 60, 60, 120, 200, 300, 550, 900, 1050, 1100, 1150, 1200, 1200, 1150, 1050, 850, 700, 550, 450, 300, 180]
+};
+const PROFIL_TOP = Math.max(...DOEGNPROFIL.mantor);
+
 function tilMinutter(hhmm) { const [h, m] = String(hhmm || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); }
-function trafikPeriode(S, dag, tid) {
-  const m = tilMinutter(tid);
-  for (const p of S.perioder) {
-    if (!p.dage.includes(dag)) continue;
-    const a = tilMinutter(p.fra), b = tilMinutter(p.til);
-    const inde = a <= b ? (m >= a && m < b) : (m >= a || m < b); // tidsrum over midnat
-    if (inde) return { navn: p.navn, f: p.f };
-  }
-  return { navn: 'Intet tidsrum passer – fri trafik', f: { motorvej: 0, landevej: 0, byvej: 0, villavej: 0 } };
+
+// Trafikniveau på et tidspunkt: 1 = hverdagens travleste time, 0 = ingen trafik
+function trafikNiveau(dag, tid) {
+  const p = DOEGNPROFIL[dag] || DOEGNPROFIL.mantor;
+  const t = tilMinutter(tid) / 60 - 0.5;             // timeværdien gælder midt i timen
+  const i = Math.floor(t), f = t - i;
+  const a = p[(i + 24) % 24], b = p[(i + 25) % 24];
+  return (a + f * (b - a)) / PROFIL_TOP;
+}
+
+// Andel af farten, almindelig trafik mister ved belastningsgrad B (figur 4.20–4.22).
+// Kurverne er flade ved lav belastning og falder først tæt på kapacitetsgrænsen (B = 1).
+// Jo højere fri hastighed, jo større fald: 2-sporet vej 100 km/t → ca. 65, 80 → ca. 62, 60 → ca. 57.
+function fartTab(klasse, vFri, B) {
+  B = Math.min(Math.max(B, 0), 1);
+  if (klasse === 0) return 0.30 * Math.pow(B, 5.5);  // motorvej / 4 spor: ca. −30 % ved B = 1
+  const a = Math.min(0.38, Math.max(0.03, (vFri - 55) / 125));
+  return a * Math.pow(B, 3.5);
+}
+
+// Middelforsinkelse (sek.) for almindelige biler i et kryds ved belastningsgrad B.
+// Tilpasset håndbogens serviceniveauer: lav belastning ≈ A (≤ 10 sek.), høj belastning ≈ D–E.
+function krydsTrafik(type, B) {
+  B = Math.min(Math.max(B, 0), 1);
+  if (type === 'signal') return 30 * B / (1 - 0.55 * B);      // B 0,5 ≈ 27 sek. · B 0,85 ≈ 48 sek.
+  if (type === 'rundkorsel') return 14 * B / (1 - 0.6 * B);   // B 0,5 ≈ 10 sek. · B 0,85 ≈ 24 sek.
+  return 6 * B / (1 - 0.6 * B);                                // vigepligt: B 0,5 ≈ 4 sek. · B 0,85 ≈ 10 sek.
+}
+
+// Samler trafikken for et scenarie: belastningsgrad pr. vejtype og hvor meget brandbilen påvirkes
+function trafikTilstand(S, dag, tid) {
+  const niveau = trafikNiveau(dag, tid);
+  const B = {};
+  for (const v of VEJTYPER) B[v] = Math.min(1, niveau * Number(S.trafik.spids[v] ?? 0));
+  const andel = S.udrykning ? Math.min(1, Math.max(0, Number(S.trafik.andelUdrykning ?? 50) / 100)) : 1;
+  return { niveau, B, andel, navn: `${Math.round(niveau * 100)} % af hverdagens myldretid` };
 }
 
 /* Beregner køretiden (minutter) for hvert vejstykke i det valgte scenarie.
    Uendelig tid = vejstykket kan ikke bruges. */
-function segmentTider(G, S, faktor) {
+function segmentTider(G, S, T) {
   // Først farten for hver vej
   const vejFart = new Float32Array(G.antalVeje);
   for (let w = 0; w < G.antalVeje; w++) {
@@ -565,7 +622,7 @@ function segmentTider(G, S, faktor) {
     const grænse = (S.brugOsmHastighed && G.vejGraense[w] > 0) ? G.vejGraense[w] : vt.normal;
     let v = S.udrykning ? grænse + (vt.over || 0) : grænse;
     v = Math.min(v, vt.max);
-    v *= 1 - (faktor[navn] || 0) / 100;
+    v *= 1 - T.andel * fartTab(G.vejKlasse[w], grænse, T.B[navn]);   // trafikkens påvirkning
     vejFart[w] = Math.max(v, 3);
   }
   const tid = new Float32Array(G.nS);
@@ -629,11 +686,16 @@ class MinHeap {
    kommer fra i et kryds – det er nødvendigt for svingforbud og U-vendinger.
    Hver station starter med sin egen afgangstid (tid fra alarm til bilen kører ud).
    Resultat: for hvert vejstykke den tid (min) fra alarm, hvor brandbilen er nået til enden af det. */
-function korDijkstra(G, kilder, tid, S, faktor, maxT) {
+function korDijkstra(G, kilder, tid, S, T, maxT) {
   const dist = new Float64Array(G.nS).fill(Infinity);
   const knudeT = new Float64Array(G.nK).fill(Infinity);
-  const dl = S.forsinkelse || { signal: 0, rundkorsel: 0, kryds: 0 };
-  const gange = VEJTYPER.map(n => 1 + (faktor[n] || 0) / 100);
+  // Ventetid i kryds (minutter) = brandbilens grundtid + andel af trafikkens ventetid.
+  // Trafikken måles på den vigtigste vej i krydset.
+  const g = S.krydsGrund || { signal: 5, rundkorsel: 6, kryds: 3 };
+  const fSignal = VEJTYPER.map(v => (g.signal + T.andel * krydsTrafik('signal', T.B[v])) / 60);
+  const fRund = VEJTYPER.map(v => (g.rundkorsel + T.andel * krydsTrafik('rundkorsel', T.B[v])) / 60);
+  const fVige = VEJTYPER.map(v => (g.kryds + T.andel * krydsTrafik('vige', T.B[v])) / 60);
+  const fPassage = g.kryds * 0.5 / 60;                 // kryds på vej med forkørselsret
   const kø = new MinHeap();
   for (const kilde of kilder) {
     const k = kilde.idx, start = kilde.start;
@@ -657,12 +719,15 @@ function korDijkstra(G, kilder, tid, S, faktor, maxT) {
       if (t === (s ^ 1) && grad > 1) continue;            // ingen U-vending (undtagen blinde veje)
       const wt = G.sVej[t];
       if (r) { if (r.kun >= 0 && wt !== r.kun) continue; if (r.ikke.has(wt)) continue; }
-      const ct = G.vejKlasse[wt];
+      const ct = G.vejKlasse[wt], cs = G.vejKlasse[ws], mk = G.knudeMinKlasse[v];
       let forsink = 0;
-      if (G.knudeSignal[v]) forsink = dl.signal;
-      else if (G.vejRund[wt] && !G.vejRund[ws]) forsink = dl.rundkorsel;
-      else if (grad >= 3 && ct !== 0 && !(G.vejRund[wt] && G.vejRund[ws])) forsink = dl.kryds;
-      const nd = d + (forsink || 0) / 60 * gange[ct] + tt;
+      if (G.knudeSignal[v]) forsink = fSignal[mk];
+      else if (G.vejRund[wt] && !G.vejRund[ws]) forsink = fRund[mk];
+      else if (grad >= 3 && ct !== 0 && !(G.vejRund[wt] && G.vejRund[ws])) {
+        // Kommer brandbilen fra en mindre vej end den vigtigste i krydset, har den vigepligt
+        forsink = mk < cs ? fVige[mk] : fPassage;
+      }
+      const nd = d + forsink + tt;
       if (nd < dist[t]) { dist[t] = nd; kø.push(nd, t); }
     }
   }
@@ -771,22 +836,11 @@ function lavKurver(gr, tider) {
 const GEM_NOEGLE = 'korekurver-indstillinger-v1';
 const uid = () => Math.random().toString(36).slice(2, 9);
 
-function standardPerioder() {
-  return [
-    { navn: 'Morgenmyldretid', dage: ['hverdag'], fra: '07:00', til: '09:00', f: { motorvej: 25, landevej: 15, byvej: 40, villavej: 10 } },
-    { navn: 'Eftermiddagsmyldretid', dage: ['hverdag'], fra: '15:00', til: '17:30', f: { motorvej: 30, landevej: 20, byvej: 40, villavej: 10 } },
-    { navn: 'Dagtrafik', dage: ['hverdag'], fra: '09:00', til: '15:00', f: { motorvej: 5, landevej: 5, byvej: 15, villavej: 5 } },
-    { navn: 'Aften', dage: ['hverdag'], fra: '17:30', til: '22:00', f: { motorvej: 0, landevej: 0, byvej: 10, villavej: 0 } },
-    { navn: 'Lørdag dag', dage: ['lordag'], fra: '09:00', til: '18:00', f: { motorvej: 5, landevej: 5, byvej: 15, villavej: 5 } },
-    { navn: 'Søndag/helligdag dag', dage: ['sondag'], fra: '10:00', til: '18:00', f: { motorvej: 5, landevej: 5, byvej: 5, villavej: 0 } },
-    { navn: 'Nat', dage: ['hverdag', 'lordag', 'sondag'], fra: '22:00', til: '06:00', f: { motorvej: 0, landevej: 0, byvej: 0, villavej: 0 } }
-  ];
-}
 function standardIndstillinger() {
   return {
     stationer: [{ id: uid(), navn: 'Eksempel – Odense centrum', lat: 55.3959, lon: 10.3883, aktiv: true, afgang: 2 }],
     tider: [5, 10, 15],
-    scenA: { dag: 'hverdag', tid: '07:30' },
+    scenA: { dag: 'mantor', tid: '07:30' },
     sammenlign: true,
     scenB: { dag: 'sondag', tid: '03:00' },
     visning: 'overlay',
@@ -799,8 +853,11 @@ function standardIndstillinger() {
     brugOsmHastighed: true,
     udrykning: true,
     modEnsretning: false,
-    forsinkelse: { signal: 6, rundkorsel: 6, kryds: 2 },
-    perioder: standardPerioder(),
+    krydsGrund: { signal: 5, rundkorsel: 6, kryds: 3 },   // sek. uden anden trafik
+    trafik: {
+      spids: { motorvej: 0.8, landevej: 0.55, byvej: 0.75, villavej: 0.3 }, // belastningsgrad i hverdagens travleste time
+      andelUdrykning: 50                                                      // % af trafikkens forsinkelse, brandbilen får
+    },
     sparringer: [],
     beregning: { radiusKm: null, celle: 100, vejbuffer: 150, servicevej: false },
     personerPrAdresse: 2.1,
@@ -822,7 +879,14 @@ function hentIndstillinger() {
   return standardIndstillinger();
 }
 // Ældre indstillinger havde én fælles afmarchtid – nu har hver station sin egen afgangstid
-function retAfgang(x) { for (const s of x.stationer) s.afgang = afgangstid(s.afgang ?? x.afmarch ?? 2); delete x.afmarch; return x; }
+function retAfgang(x) {
+  for (const s of x.stationer) s.afgang = afgangstid(s.afgang ?? x.afmarch ?? 2);
+  delete x.afmarch;
+  // Fra ældre versioner: "hverdag" blev til mandag–torsdag, og de manuelle tidsrum er erstattet af trafikmodellen
+  for (const sc of [x.scenA, x.scenB]) if (sc && !DAGE[sc.dag]) sc.dag = 'mantor';
+  delete x.perioder; delete x.forsinkelse;
+  return x;
+}
 function gem() { try { localStorage.setItem(GEM_NOEGLE, JSON.stringify(S)); } catch (e) {} }
 
 let S = hentIndstillinger();
@@ -898,7 +962,7 @@ const legendeA = lavLegende(kortA), legendeB = lavLegende(kortB);
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (x, d = 1) => (x == null || !isFinite(x)) ? '–' : x.toLocaleString('da-DK', { minimumFractionDigits: d, maximumFractionDigits: d });
-const scenTekst = sc => `${DAGE[sc.dag] ? DAGE[sc.dag].replace(' (man–fre)', '') : sc.dag} kl. ${sc.tid}`;
+const scenTekst = sc => `${DAGE[sc.dag] || sc.dag} kl. ${sc.tid}`;
 
 function hentSti(o, sti) { return sti.split('.').reduce((a, k) => a == null ? a : a[k], o); }
 function saetSti(o, sti, v) {
@@ -959,27 +1023,46 @@ function renderVejTabel() {
     `</tbody><tfoot><tr><td colspan="4" class="hint" style="padding-top:4px">Alle værdier i km/t</td></tr></tfoot>`;
 }
 
-function renderPerioder() {
-  $('periodeListe').innerHTML = S.perioder.map((p, i) => `
-    <div class="periode">
-      <div class="top">
-        <input type="text" data-k="perioder.${i}.navn" value="${esc(p.navn)}" aria-label="Navn på tidsrum">
-        <button class="ikonknap" data-act="slet-periode" data-i="${i}" aria-label="Fjern tidsrum">×</button>
-      </div>
-      <div class="raekke">
-        <label class="f"><span>Fra</span><input type="time" data-k="perioder.${i}.fra" value="${p.fra}"></label>
-        <label class="f"><span>Til</span><input type="time" data-k="perioder.${i}.til" value="${p.til}"></label>
-      </div>
-      <div class="dage">${Object.entries(DAGE).map(([k, n]) => `<label class="chk"><input type="checkbox" data-dagp="${i}" data-dag="${k}" ${p.dage.includes(k) ? 'checked' : ''}> ${n.replace(' (man–fre)', '')}</label>`).join('')}</div>
-      <div class="fak">${VEJTYPER.map(v => `<label class="f"><span>${VEJTYPE_NAVN[v]} %</span><input type="number" min="0" max="95" step="5" data-k="perioder.${i}.f.${v}" data-t="num" value="${p.f[v]}"></label>`).join('')}</div>
-    </div>`).join('');
+const KURVEFARVE = { mantor: 'var(--accent)', fredag: 'var(--warn)', lordag: 'var(--ok)', sondag: 'var(--muted)' };
+function renderTrafik() {
+  // Tabel: myldretidsbelastning pr. vejtype og den aktuelle belastning i scenarierne
+  const TA = trafikTilstand(S, S.scenA.dag, S.scenA.tid), TB = trafikTilstand(S, S.scenB.dag, S.scenB.tid);
+  $('trafikTabel').innerHTML = `<thead><tr><th>Vejtype</th><th>Myldretid</th><th>Nu A</th>${S.sammenlign ? '<th>Nu B</th>' : ''}</tr></thead><tbody>` +
+    VEJTYPER.map(v => `<tr><td>${VEJTYPE_NAVN[v]}</td>
+      <td><input type="number" min="0" max="1" step="0.05" data-k="trafik.spids.${v}" data-t="num" value="${S.trafik.spids[v]}" aria-label="${VEJTYPE_NAVN[v]} belastningsgrad i myldretid"></td>
+      <td class="tal">${fmt(TA.B[v], 2)}</td>${S.sammenlign ? `<td class="tal">${fmt(TB.B[v], 2)}</td>` : ''}</tr>`).join('') + '</tbody>';
+  // Graf over døgnet
+  const W = 360, H = 150, x0 = 26, x1 = W - 6, y0 = 10, y1 = H - 22;
+  const X = t => x0 + (x1 - x0) * t / 24, Y = n => y1 - (y1 - y0) * Math.min(n, 1.05) / 1.05;
+  let h = '';
+  for (const n of [0, 0.5, 1]) h += `<line x1="${x0}" x2="${x1}" y1="${Y(n)}" y2="${Y(n)}" stroke="var(--line)" stroke-width="1"/><text x="${x0 - 4}" y="${Y(n) + 3}" text-anchor="end">${Math.round(n * 100)}%</text>`;
+  for (const t of [0, 6, 12, 18, 24]) h += `<text x="${X(t)}" y="${H - 8}" text-anchor="middle">${String(t).padStart(2, '0')}</text>`;
+  for (const dag of Object.keys(DAGE)) {
+    let d = '';
+    for (let m = 0; m <= 24 * 60; m += 20) d += (m ? 'L' : 'M') + X(m / 60).toFixed(1) + ' ' + Y(trafikNiveau(dag, `${Math.floor(m / 60)}:${m % 60}`)).toFixed(1);
+    const aktiv = dag === S.scenA.dag || (S.sammenlign && dag === S.scenB.dag);
+    h += `<path d="${d}" fill="none" stroke="${KURVEFARVE[dag]}" stroke-width="${aktiv ? 2.2 : 1.2}" opacity="${aktiv ? 1 : 0.45}"/>`;
+  }
+  const prik = (sc, navn) => { const t = tilMinutter(sc.tid) / 60, n = trafikNiveau(sc.dag, sc.tid);
+    return `<line x1="${X(t)}" x2="${X(t)}" y1="${y0}" y2="${y1}" stroke="var(--fg)" stroke-width="1" stroke-dasharray="2 2" opacity=".5"/><circle cx="${X(t)}" cy="${Y(n)}" r="4.5" fill="var(--panel)" stroke="var(--fg)" stroke-width="1.6"/><text x="${X(t) + 6}" y="${Math.max(Y(n) - 6, y0 + 8)}" style="fill:var(--fg);font-weight:600">${navn}</text>`; };
+  h += prik(S.scenA, 'A'); if (S.sammenlign) h += prik(S.scenB, 'B');
+  // Forklaring
+  let lx = x0;
+  for (const [dag, navn] of Object.entries(DAGE)) { h += `<line x1="${lx}" x2="${lx + 10}" y1="${y0 - 3}" y2="${y0 - 3}" stroke="${KURVEFARVE[dag]}" stroke-width="2"/><text x="${lx + 13}" y="${y0}">${navn.replace('/helligdag', '')}</text>`; lx += navn.length * 4.6 + 26; }
+  $('doegnGraf').innerHTML = h;
 }
 
+// Viser kort, hvad trafikken betyder for brandbilen på det valgte tidspunkt (målt på en byvej)
+function krydsTekst(T) {
+  const g = S.krydsGrund, B = T.B.byvej;
+  const sig = g.signal + T.andel * krydsTrafik('signal', B), rund = g.rundkorsel + T.andel * krydsTrafik('rundkorsel', B);
+  return `Trafik: <b>${esc(T.navn)}</b> · brandbilen: lyskryds ca. ${fmt(sig, 0)} sek., rundkørsel ca. ${fmt(rund, 0)} sek. (byvej)`;
+}
 function renderPeriodeVisning() {
-  const a = trafikPeriode(S, S.scenA.dag, S.scenA.tid), b = trafikPeriode(S, S.scenB.dag, S.scenB.tid);
-  const t = p => `Tidsrum: <b>${esc(p.navn)}</b> · ` + VEJTYPER.map(v => `${VEJTYPE_NAVN[v].toLowerCase()} −${p.f[v] || 0} %`).join(', ');
-  $('perA').innerHTML = t(a); $('perB').innerHTML = t(b);
+  $('perA').innerHTML = krydsTekst(trafikTilstand(S, S.scenA.dag, S.scenA.tid));
+  $('perB').innerHTML = krydsTekst(trafikTilstand(S, S.scenB.dag, S.scenB.tid));
   $('scenBBoks').hidden = !S.sammenlign;
+  renderTrafik();
 }
 
 function renderSparringer() {
@@ -1014,7 +1097,7 @@ function opdaterLayout() {
 }
 
 function renderAlt() {
-  udfyldFelter(); renderStationer(); renderVejTabel(); renderPerioder(); renderPeriodeVisning(); renderSparringer(); opdaterRadiusHint(); saetBaggrund();
+  udfyldFelter(); renderStationer(); renderVejTabel(); renderPeriodeVisning(); renderSparringer(); opdaterRadiusHint(); saetBaggrund();
 }
 
 /* Markører på kortet */
@@ -1080,11 +1163,6 @@ kortA.on('click', kortKlik); kortB.on('click', kortKlik);
 // Alle felter med data-k opdaterer indstillingerne direkte
 $('side').addEventListener('change', e => {
   const el = e.target;
-  if (el.dataset.dagp !== undefined) {           // dag-afkrydsning i et tidsrum
-    const p = S.perioder[Number(el.dataset.dagp)], d = el.dataset.dag;
-    p.dage = el.checked ? [...new Set([...p.dage, d])] : p.dage.filter(x => x !== d);
-    gem(); renderPeriodeVisning(); markerForaeldet(); return;
-  }
   const k = el.dataset.k; if (!k) return;
   let v;
   if (el.type === 'checkbox') v = el.checked;
@@ -1094,7 +1172,7 @@ $('side').addEventListener('change', e => {
   saetSti(S, k, v); gem();
   if (k.startsWith('stationer')) { renderStationer(); opdaterRadiusHint(); }
   if (k.startsWith('sparringer')) { tegnSparringer(); }
-  if (k.startsWith('scen') || k.startsWith('perioder') || k === 'sammenlign') renderPeriodeVisning();
+  if (k.startsWith('scen') || k.startsWith('trafik') || k.startsWith('krydsGrund') || k === 'sammenlign' || k === 'udrykning') renderPeriodeVisning();
   if (k === 'kort') saetBaggrund();
   if (k === 'visning' || k === 'sammenlign') { opdaterLayout(); tegnResultater(); }
   if (k !== 'kort' && !k.endsWith('.navn') && !k.endsWith('.note') && k !== 'visning') markerForaeldet();
@@ -1112,9 +1190,6 @@ document.addEventListener('click', async e => {
   const i = Number(b.dataset.i);
   switch (b.dataset.act) {
     case 'slet-station': S.stationer.splice(i, 1); renderStationer(); break;
-    case 'slet-periode': S.perioder.splice(i, 1); renderPerioder(); renderPeriodeVisning(); break;
-    case 'ny-periode': S.perioder.push({ navn: 'Nyt tidsrum', dage: ['hverdag'], fra: '08:00', til: '10:00', f: { motorvej: 0, landevej: 0, byvej: 0, villavej: 0 } }); renderPerioder(); break;
-    case 'std-perioder': S.perioder = standardPerioder(); renderPerioder(); renderPeriodeVisning(); break;
     case 'slet-sparring': S.sparringer.splice(i, 1); renderSparringer(); break;
     case 'gem-fil': hentFil(new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' }), `korekurver-indstillinger-${datoStempel()}.json`); return;
     case 'hent-fil': $('filInput').click(); return;
@@ -1389,9 +1464,9 @@ async function beregn() {
       for (const [n, sc] of scen) {
         status(`Regner hurtigste veje for scenarie ${n} (${scenTekst(sc)}) …`); await pause();
         if (signal.aborted) throw stopFejl();
-        const per = trafikPeriode(S, sc.dag, sc.tid);
-        const tid = segmentTider(G, S, per.f);
-        const res = korDijkstra(G, kilder, tid, S, per.f, maxT);
+        const per = trafikTilstand(S, sc.dag, sc.tid);
+        const tid = segmentTider(G, S, per);
+        const res = korDijkstra(G, kilder, tid, S, per, maxT);
         if (naarKanten(res, maxT)) kant.push(n);
         nyRes.scen[n] = { sc: { ...sc }, per, tid, res };
       }
@@ -1483,7 +1558,7 @@ function visResultater() {
     h += '</tr>';
   });
   h += '</tbody></table></div>';
-  h += `<p class="hint" style="margin-top:6px">Tidsrum A: ${esc(A.per.navn)}${B ? ` · Tidsrum B: ${esc(B.per.navn)}` : ''}. Tid regnet fra alarm. Stationer (afgangstid): ${RES.stationer.map(s => `${esc(s.navn)} (${String(afgangstid(s.afgang)).replace('.', ',')} min)`).join(', ')}.${harAdr ? ' Indbyggertal er et skøn (adresser × ' + fmt(S.personerPrAdresse, 1) + ').' : ''}</p>`;
+  h += `<p class="hint" style="margin-top:6px">Trafik A: ${esc(A.per.navn)}${B ? ` · Trafik B: ${esc(B.per.navn)}` : ''} (Vejdirektoratets døgnprofil). Tid regnet fra alarm. Stationer (afgangstid): ${RES.stationer.map(s => `${esc(s.navn)} (${String(afgangstid(s.afgang)).replace('.', ',')} min)`).join(', ')}.${harAdr ? ' Indbyggertal er et skøn (adresser × ' + fmt(S.personerPrAdresse, 1) + ').' : ''}</p>`;
   $('resIndhold').innerHTML = h;
 }
 
@@ -1529,7 +1604,7 @@ function eksGeoJSON() {
     sc.kumulativ.forEach((f, i) => {
       if (!f) return;
       feats.push({ type: 'Feature', geometry: f.geometry, properties: {
-        scenarie: n, tidspunkt: scenTekst(sc.sc), trafikperiode: sc.per.navn, koeretid_min: RES.tider[i],
+        scenarie: n, tidspunkt: scenTekst(sc.sc), trafik: sc.per.navn, koeretid_min: RES.tider[i],
         areal_km2: Math.round(sc.areal[i] * 100) / 100,
         adresser: sc.adresser ? sc.adresser[i] : null,
         indbyggere_skoen: sc.adresser ? Math.round(sc.adresser[i] * S.personerPrAdresse) : null,
@@ -1651,13 +1726,14 @@ async function eksPDF() {
     const linje = (t, b = false) => { doc.setFont('helvetica', b ? 'bold' : 'normal'); const l = doc.splitTextToSize(t, 297 - 2 * M); doc.text(l, M, y); y += l.length * 4.6 + (b ? 1 : 0); };
     linje('Kurver (tid fra alarm): ' + RES.tider.map(t => String(t).replace('.', ',') + ' min').join(', '));
     linje('Afgangstid pr. station: ' + RES.stationer.map(s => `${s.navn} ${String(afgangstid(s.afgang)).replace('.', ',')} min`).join(' · '));
-    linje(`Scenarie A: ${scenTekst(A.sc)} – tidsrum "${A.per.navn}"` + (B ? ` · Scenarie B: ${scenTekst(B.sc)} – tidsrum "${B.per.navn}"` : ''));
+    linje(`Scenarie A: ${scenTekst(A.sc)} – trafik ${A.per.navn}` + (B ? ` · Scenarie B: ${scenTekst(B.sc)} – trafik ${B.per.navn}` : ''));
     linje(`Udrykningskørsel: ${S.udrykning ? 'ja' : 'nej'} · Skiltet hastighed fra OpenStreetMap: ${S.brugOsmHastighed ? 'ja' : 'nej'} · Kørsel mod ensretning: ${S.modEnsretning ? 'tilladt på by-/villaveje' : 'nej'}`);
     y += 2; linje('Hastigheder (km/t)', true);
     VEJTYPER.forEach(v => linje(`${VEJTYPE_NAVN[v]}: normal ${S.vej[v].normal}, udrykning +${S.vej[v].over}, maks. ${S.vej[v].max}` +
-      ` · trafik A -${A.per.f[v] || 0} %` + (B ? `, B -${B.per.f[v] || 0} %` : '')));
-    y += 2; linje('Forsinkelse i kryds (sekunder)', true);
-    linje(`Lyskryds ${S.forsinkelse.signal} · Rundkørsel ${S.forsinkelse.rundkorsel} · Andre kryds ${S.forsinkelse.kryds} (øges med trafikprocenten)`);
+      ` · belastningsgrad A ${fmt(A.per.B[v], 2)}` + (B ? `, B ${fmt(B.per.B[v], 2)}` : '') + ` (myldretid ${fmt(S.trafik.spids[v], 2)})`));
+    y += 2; linje('Kryds og trafik', true);
+    linje(`Grundtid uden trafik: lyskryds ${S.krydsGrund.signal} sek. · rundkørsel ${S.krydsGrund.rundkorsel} sek. · vigepligt ${S.krydsGrund.kryds} sek.`);
+    linje(`Trafikkens påvirkning efter Vejdirektoratets Håndbog Kapacitet og serviceniveau (2024): døgnprofil (fig. 10.5), hastighedskurver (fig. 4.20-4.22) og middelforsinkelse i kryds (fig. 5.4, 6.4, 7.1). Brandbilen får ${S.udrykning ? S.trafik.andelUdrykning : 100} % af forsinkelsen for almindelig trafik.`);
     if (S.sparringer.length) { y += 2; linje('Spærringer og vejarbejde', true); S.sparringer.forEach(s => linje(`${s.type === 'lukket' ? 'Lukket vej' : 'Vejarbejde -' + s.fald + ' %'} ved ${s.lat.toFixed(5)}, ${s.lon.toFixed(5)} (radius ${s.radius} m)${s.note ? ' – ' + s.note : ''}`)); }
     y += 2; linje('Metode', true);
     linje('Vejnettet er hentet fra OpenStreetMap. For hvert vejstykke beregnes en fart ud fra vejtype, skiltet hastighed, udrykningstillæg, trafikfaktor og eventuelt vejarbejde. Den hurtigste rute fra nærmeste station findes med Dijkstras algoritme, hvor ensretning og registrerede svingforbud overholdes, og der lægges tid til i kryds. Områder inden for ' + S.beregning.vejbuffer + ' m af en nåelig vej medregnes. Kurverne er tegnet på et net med ca. ' + Math.round(A.gr.celle) + ' m opløsning. Indbyggertal er et skøn (adresser × ' + String(S.personerPrAdresse).replace('.', ',') + ').');
