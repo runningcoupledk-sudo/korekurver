@@ -1251,8 +1251,11 @@ const datoStempel = () => new Date().toISOString().slice(0, 10);
 /* Vejnettet hentes fra de gratis Overpass-servere i felter på ca. 9 × 9 km.
    Små forespørgsler er langt hurtigere og mere stabile end én stor.
    Hvert felt gemmes i browseren i 30 dage, så næste beregning går hurtigt. */
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
-const NET = { svarGraense: 90000, samtidige: 2, pause: 4000 }; // ventetid pr. forespørgsel (ms), felter ad gangen
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+// svarGraense: hvor længe der ventes på svar (ms) · serverTid: hvor længe serveren må regne (sek.) – kortere,
+// så en for tung forespørgsel bliver afvist af serveren i stedet for at hænge · samtidige: felter ad gangen
+const NET = { svarGraense: 100000, serverTid: 60, samtidige: 2, pause: 5000 };
+const serverFejl = OVERPASS.map(() => 0);  // fejl i træk pr. server – servere med mange fejl prøves sidst
 const FELT_LAT = 0.08, FELT_LON = 0.14;   // feltstørrelse i grader (≈ 8,9 × 8,8 km i Danmark)
 const MELLEMLAGER_DAGE = 30;
 let afbryd = null;                       // bruges af knappen "Afbryd"
@@ -1266,12 +1269,17 @@ function vent(ms, signal) {
   });
 }
 
-// Sender én forespørgsel. Prøver næste server, hvis en er langsom, optaget eller giver fejl.
-async function overpass(q, signal) {
-  let sidste = null;
-  for (let forsoeg = 0; forsoeg < OVERPASS.length * 2; forsoeg++) {
+// Sender én forespørgsel. Prøver serverne én gang hver – den der senest virkede først.
+// Fejlen markeres som "tung", hvis serverne ikke nåede at blive færdige (så kan feltet deles op).
+async function overpass(q, signal, kanDeles = false) {
+  let sidste = null, tung = false, forsoegt = 0;
+  const raekke = OVERPASS.map((_, i) => i).sort((a, b) => (a === godServer ? -1 : b === godServer ? 1 : serverFejl[a] - serverFejl[b]));
+  for (const nr of raekke) {
     if (signal?.aborted) throw stopFejl();
-    const nr = (godServer + forsoeg) % OVERPASS.length, url = OVERPASS[nr];
+    // Har to servere ikke kunnet klare feltet, er det for tungt – så er det hurtigere at dele det
+    if (kanDeles && tung && forsoegt >= 2) break;
+    forsoegt++;
+    const url = OVERPASS[nr];
     const ac = new AbortController();
     let forSent = false;
     const timer = setTimeout(() => { forSent = true; ac.abort(); }, NET.svarGraense);
@@ -1279,24 +1287,24 @@ async function overpass(q, signal) {
     signal?.addEventListener('abort', stop);
     try {
       const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ac.signal });
-      if (r.status === 429 || r.status === 503 || r.status === 504) {
-        sidste = new Error(r.status === 429 ? 'serverne er optaget' : 'serveren havde for travlt');
-        clearTimeout(timer);
-        await vent(NET.pause * (forsoeg < OVERPASS.length ? 1 : 2), signal);
-        continue;
-      }
+      if (r.status === 429 || r.status === 503) { sidste = new Error('serverne er optaget'); serverFejl[nr]++; clearTimeout(timer); await vent(NET.pause, signal); continue; }
+      if (r.status === 504) { sidste = new Error('serveren havde for travlt'); tung = true; serverFejl[nr]++; continue; }
       if (!r.ok) throw new Error('HTTP-fejl ' + r.status);
       const d = await r.json();
       // Overpass svarer "200 OK" med halve data, hvis den løber tør for tid – det må ikke bruges
-      if (d.remark && /runtime error|timed out|out of memory/i.test(d.remark)) throw new Error('serveren nåede ikke at blive færdig');
-      godServer = nr;
+      if (d.remark && /runtime error|timed out|out of memory/i.test(d.remark)) { tung = true; throw new Error('serveren nåede ikke at blive færdig'); }
+      serverFejl[nr] = 0; godServer = nr;
       return d;
     } catch (e) {
       if (signal?.aborted) throw stopFejl();
+      if (forSent) tung = true;
+      serverFejl[nr]++;
       sidste = forSent ? new Error(`serveren svarede ikke inden for ${Math.round(NET.svarGraense / 1000)} sekunder`) : e;
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', stop); }
   }
-  throw new Error('Kunne ikke hente data fra OpenStreetMap (' + (sidste ? sidste.message : 'ukendt fejl') + '). Vent et minut og prøv igen.');
+  const fejl = new Error(sidste ? sidste.message : 'ukendt fejl');
+  fejl.tung = tung;
+  throw fejl;
 }
 
 /* Mellemlager i browseren (IndexedDB). Virker det ikke, hentes data bare hver gang. */
@@ -1331,9 +1339,10 @@ async function lagerRyd() {
 }
 
 // Hvilke felter skal hentes for at dække en cirkel med radius R (meter) om hver station?
-function felterOmStationer(stationer, R) {
+function felterOmStationer(stationer, Rliste) {
   const ud = new Map();
-  for (const s of stationer) {
+  stationer.forEach((s, nr) => {
+    const R = Array.isArray(Rliste) ? Rliste[nr] : Rliste;   // hver station kan have sin egen radius
     const dLat = R / 110574, dLon = R / (111320 * Math.cos(s.lat * Math.PI / 180));
     for (let i = Math.floor((s.lat - dLat) / FELT_LAT); i <= Math.floor((s.lat + dLat) / FELT_LAT); i++) {
       for (let j = Math.floor((s.lon - dLon) / FELT_LON); j <= Math.floor((s.lon + dLon) / FELT_LON); j++) {
@@ -1342,7 +1351,7 @@ function felterOmStationer(stationer, R) {
         if (afstand(s.lat, s.lon, la, lo) <= R) ud.set(f.id, f);
       }
     }
-  }
+  });
   return [...ud.values()];
 }
 function felterIFirkant(bb) { // bb = [vest, syd, øst, nord]
@@ -1356,14 +1365,22 @@ function feltFra(i, j) {
   return { id: i + '_' + j, s, w, n: s + FELT_LAT, e: w + FELT_LON, bb: `(${s.toFixed(5)},${w.toFixed(5)},${(s + FELT_LAT).toFixed(5)},${(w + FELT_LON).toFixed(5)})` };
 }
 
+// Deler et felt i fire mindre (bruges når et felt er for tungt for serveren)
+function delFelt(f) {
+  const ml = (f.s + f.n) / 2, mo = (f.w + f.e) / 2, ud = [];
+  for (const [s, n] of [[f.s, ml], [ml, f.n]]) for (const [w, e] of [[f.w, mo], [mo, f.e]])
+    ud.push({ id: f.id + '.' + ud.length, s, w, n, e, bb: `(${s.toFixed(5)},${w.toFixed(5)},${n.toFixed(5)},${e.toFixed(5)})` });
+  return ud;
+}
+
 const VEJE_HW = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street';
 function vejForespoergsel(f, service) {
-  return `[out:json][timeout:80];(way["highway"~"^(${VEJE_HW})$"]["area"!="yes"]${f.bb};` +
+  return `[out:json][timeout:${NET.serverTid}];(way["highway"~"^(${VEJE_HW})$"]["area"!="yes"]${f.bb};` +
     (service ? `way["highway"="service"]["service"!~"^(parking_aisle|driveway|drive-through)$"]["area"!="yes"]${f.bb};` : '') +
     `)->.w;.w out geom qt;node(w.w)["highway"="traffic_signals"];out skel qt;rel(bw.w)["type"="restriction"];out body qt;`;
 }
 function adresseForespoergsel(f) {
-  return `[out:json][timeout:80];node["addr:housenumber"]${f.bb};out skel qt;way["addr:housenumber"]${f.bb};out ids center qt;`;
+  return `[out:json][timeout:${NET.serverTid}];node["addr:housenumber"]${f.bb};out skel qt;way["addr:housenumber"]${f.bb};out ids center qt;`;
 }
 
 // Fjerner alt, programmet ikke bruger – så fylder data mindre i hukommelsen og i mellemlageret
@@ -1381,33 +1398,71 @@ function slank(el) {
   return { type: el.type, id: el.id, lat: el.lat, lon: el.lon };
 }
 
-/* Henter en række felter – to ad gangen – og samler dem. Viser fremdrift undervejs. */
+/* Henter ét felt: fra mellemlageret, ellers fra serverne. Er feltet for tungt, deles det i fire. */
+async function hentFelt(f, slags, lavQ, signal, dybde) {
+  const noegle = slags + '|' + f.id;
+  const gemt = await lagerHent(noegle);
+  if (gemt) return { el: gemt, lager: true };
+  try {
+    const d = await overpass(lavQ(f), signal, dybde < 2);
+    const el = d.elements.map(slank);
+    lagerGem(noegle, el);
+    return { el };
+  } catch (e) {
+    if (e.stop || !e.tung || dybde >= 2) throw e;
+    const ud = [];
+    for (const del of delFelt(f)) ud.push(...(await hentFelt(del, slags, lavQ, signal, dybde + 1)).el);
+    lagerGem(noegle, ud);   // gemmes samlet, så feltet ikke skal deles igen næste gang
+    return { el: ud };
+  }
+}
+
+/* Henter en række felter og samler dem. Et felt, der fejler, stopper ikke det hele:
+   felterne prøves først to ad gangen, og dem der fejlede, prøves bagefter igen ét ad gangen
+   med længere ventetid. Hentede felter gemmes, så et nyt forsøg fortsætter, hvor det slap. */
 async function hentFelter(felter, slags, lavQ, signal, tekst) {
   const samlet = new Map();
-  let faerdige = 0, fraLager = 0;
+  let faerdige = 0, fraLager = 0, runde = 1;
   const t0 = Date.now();
   const vis = () => status(`${tekst}: ${faerdige} af ${felter.length} felter (${Math.round((Date.now() - t0) / 1000)} sek.)` +
-    (fraLager ? ` – ${fraLager} fra mellemlageret` : '') + '. Første gang i et område tager typisk ½–2 min.');
+    (fraLager ? ` – ${fraLager} fra mellemlageret` : '') + (runde > 1 ? ' – prøver de sidste igen' : '. Første gang i et område tager typisk ½–2 min.'));
   vis();
   const ur = setInterval(vis, 1000);
-  const kø = [...felter];
-  const arbejder = async () => {
-    while (kø.length) {
-      const f = kø.shift();
-      const noegle = slags + '|' + f.id;
-      let el = await lagerHent(noegle);
-      if (el) fraLager++;
-      else {
-        const d = await overpass(lavQ(f), signal);
-        el = d.elements.map(slank);
-        lagerGem(noegle, el);
+  let sidsteFejl = null;
+  const koer = async (liste, samtidige) => {
+    const kø = [...liste], fejlede = [];
+    const arbejder = async () => {
+      while (kø.length) {
+        const f = kø.shift();
+        try {
+          const r = await hentFelt(f, slags, lavQ, signal, 0);
+          if (r.lager) fraLager++;
+          for (const e of r.el) samlet.set(e.type[0] + e.id, e);
+          faerdige++; vis();
+        } catch (e) {
+          if (e.stop) throw e;
+          sidsteFejl = e; fejlede.push(f);
+        }
       }
-      for (const e of el) samlet.set(e.type[0] + e.id, e);
-      faerdige++; vis();
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(samtidige, liste.length) }, arbejder));
+    return fejlede;
   };
-  try { await Promise.all(Array.from({ length: Math.min(NET.samtidige, felter.length) }, arbejder)); }
-  finally { clearInterval(ur); }
+  const gemt = { ...NET };
+  try {
+    let mangler = await koer(felter, NET.samtidige);
+    if (mangler.length) {
+      // Anden runde: én ad gangen, længere ventetid og serverne får et øjeblik til at komme sig
+      runde = 2; vis();
+      await vent(8000, signal);
+      NET.svarGraense = 160000; NET.serverTid = 120;
+      mangler = await koer(mangler, 1);
+    }
+    if (mangler.length) {
+      throw new Error(`Kunne ikke hente ${mangler.length} af ${felter.length} felter fra OpenStreetMap (${sidsteFejl ? sidsteFejl.message : 'ukendt fejl'}). ` +
+        `Serverne er overbelastede lige nu. De ${felter.length - mangler.length} hentede felter er gemt, så næste forsøg fortsætter, hvor det slap – prøv igen om et par minutter.`);
+    }
+  } finally { clearInterval(ur); Object.assign(NET, gemt); }
   return [...samlet.values()];
 }
 
@@ -1424,19 +1479,19 @@ async function sikrVejnet(stationer, R, signal) {
     if (!G.nS) throw new Error('Der blev ikke fundet nogen veje i området.');
     CACHE = { felter: new Set(felter.map(f => f.id)), service };
   }
-  CACHE.centre = stationer.map(s => ({ lat: s.lat, lon: s.lon }));
-  CACHE.R = R;
+  CACHE.centre = stationer.map((s, i) => ({ lat: s.lat, lon: s.lon, R: Array.isArray(R) ? R[i] : R }));
 }
 
-// Når kurven ud til kanten af det hentede område?
+// Hvilke stationers område når kurven ud til kanten af? (punktet regnes til nærmeste station)
 function naarKanten(res, maxT) {
+  const ud = new Set();
   for (let k = 0; k < G.nK; k++) {
     if (res.knudeT[k] > maxT) continue;
-    let dmin = Infinity;
-    for (const c of CACHE.centre) dmin = Math.min(dmin, afstand(G.lat[k], G.lon[k], c.lat, c.lon));
-    if (dmin > CACHE.R * 0.94) return true;
+    let dmin = Infinity, ci = -1;
+    CACHE.centre.forEach((c, i) => { const d = afstand(G.lat[k], G.lon[k], c.lat, c.lon); if (d < dmin) { dmin = d; ci = i; } });
+    if (ci >= 0 && dmin > CACHE.centre[ci].R * 0.94) ud.add(ci);
   }
-  return false;
+  return ud;
 }
 
 // Med flere aktive stationer: kurver for hver station for sig (kun til visning på kortet)
@@ -1464,7 +1519,8 @@ async function beregn() {
   const advarsler = [];
   try {
     const auto = !(Number(S.beregning.radiusKm) > 0);
-    let R = (auto ? autoRadius(maxT, st) : Number(S.beregning.radiusKm)) * 1000;
+    // Hver station får sin egen radius (ved automatisk valg ud fra stationens egen afgangstid)
+    let R = st.map(s => (auto ? autoRadius(maxT, [s]) : Number(S.beregning.radiusKm)) * 1000);
     const scen = [['A', S.scenA]]; if (S.sammenlign) scen.push(['B', S.scenB]);
     let nyRes, sidsteKilder = [];
     // Ved automatisk radius udvides området selv, hvis kurven når ud til kanten (højst to gange)
@@ -1481,18 +1537,23 @@ async function beregn() {
       }
       nyRes = { tider, scen: {}, tidspunkt: new Date(), stationer: st.map(s => ({ ...s })) };
       sidsteKilder = kilder;
-      let kant = [];
+      let kant = [], kantStationer = new Set();
       for (const [n, sc] of scen) {
         status(`Regner hurtigste veje for scenarie ${n} (${scenTekst(sc)}) …`); await pause();
         if (signal.aborted) throw stopFejl();
         const per = trafikTilstand(S, sc.dag, sc.tid);
         const tid = segmentTider(G, S, per);
         const res = korDijkstra(G, kilder, tid, S, per, maxT);
-        if (naarKanten(res, maxT)) kant.push(n);
+        const k0 = naarKanten(res, maxT);
+        if (k0.size) { kant.push(n); for (const i of k0) kantStationer.add(i); }
         nyRes.scen[n] = { sc: { ...sc }, per, tid, res };
       }
       if (!kant.length) break;
-      if (auto && runde < 2 && R < 45000) { R = Math.min(45000, R * 1.35); status(`Kurven når ud til kanten – udvider området til ${(R / 1000).toFixed(0)} km …`); await pause(); continue; }
+      // Udvid kun området om de stationer, hvis kurve når kanten
+      if (auto && runde < 2 && [...kantStationer].some(i => R[i] < 45000)) {
+        R = R.map((r0, i) => kantStationer.has(i) ? Math.min(45000, r0 * 1.35) : r0);
+        status(`Kurven når ud til kanten – udvider området om ${[...kantStationer].map(i => st[i].navn).join(', ')} …`); await pause(); continue;
+      }
       advarsler.push(`scenarie ${kant.join(' og ')} når ud til kanten af det hentede vejnet – øg søgeradius`);
       break;
     }
@@ -1505,7 +1566,7 @@ async function beregn() {
       const perStation = await kurverPrStation(st, sidsteKilder, x, tider, maxT, n, signal);
       nyRes.scen[n] = { sc: x.sc, per: x.per, perStation, gr, ...k, areal: k.kumulativ.map(f => f ? turf.area(f) / 1e6 : 0), adresser: null };
     }
-    RES = nyRes; RES.radiusKm = R / 1000;
+    RES = nyRes; RES.radiusKm = Math.max(...R) / 1000;
     ADRESSER = null;
     opdaterLayout(); tegnResultater(); visResultater();
     const yderst = RES.scen.A.kumulativ.filter(Boolean).pop();
