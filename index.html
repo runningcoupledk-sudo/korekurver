@@ -756,7 +756,7 @@ function naermesteKnude(G, lat, lon) {
 
 /* Lægger et net af små felter (fx 100 × 100 m) over området. Hvert felt får den korteste
    køretid fra en nåelig vej inden for "vejbuffer" meter. Ud fra nettet tegnes kurverne. */
-function byggGitter(G, res, tid, S, maxT) {
+function byggGitter(G, res, tid, S, maxT, ramme) {
   const { dist } = res;
   const buf = Number(S.beregning.vejbuffer) || 150;
   let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity, n = 0;
@@ -770,12 +770,17 @@ function byggGitter(G, res, tid, S, maxT) {
     n++;
   }
   if (!n) return null;
-  const lat0 = (minLat + maxLat) / 2, ky = 110574, kx = 111320 * Math.cos(lat0 * Math.PI / 180);
-  const udX = (maxLon - minLon) * kx, udY = (maxLat - minLat) * ky;
-  const celle = Math.max(Number(S.beregning.celle) || 100, Math.max(udX, udY) / 420);
-  const kant = buf + 3 * celle;
-  const originLon = minLon - kant / kx, originLat = minLat - kant / ky;
-  const nx = Math.ceil((udX + 2 * kant) / celle) + 1, ny = Math.ceil((udY + 2 * kant) / celle) + 1;
+  let ky = 110574, kx, celle, originLon, originLat, nx, ny;
+  if (ramme) ({ kx, ky, celle, originLon, originLat, nx, ny } = ramme);   // samme net som en tidligere beregning
+  else {
+    const lat0 = (minLat + maxLat) / 2;
+    kx = 111320 * Math.cos(lat0 * Math.PI / 180);
+    const udX = (maxLon - minLon) * kx, udY = (maxLat - minLat) * ky;
+    celle = Math.max(Number(S.beregning.celle) || 100, Math.max(udX, udY) / 420);
+    const kant = buf + 3 * celle;
+    originLon = minLon - kant / kx; originLat = minLat - kant / ky;
+    nx = Math.ceil((udX + 2 * kant) / celle) + 1; ny = Math.ceil((udY + 2 * kant) / celle) + 1;
+  }
   const val = new Float32Array(nx * ny).fill(UOPNAAET);
   const rr = buf / celle, rc = Math.ceil(rr), off = [];
   for (let dy = -rc; dy <= rc; dy++) for (let dx = -rc; dx <= rc; dx++) if (dx * dx + dy * dy <= (rr + 0.5) * (rr + 0.5)) off.push(dx, dy);
@@ -1494,19 +1499,25 @@ function naarKanten(res, maxT) {
   return ud;
 }
 
-// Med flere aktive stationer: kurver for hver station for sig (kun til visning på kortet)
-async function kurverPrStation(st, kilder, x, tider, maxT, n, signal) {
-  if (st.length < 2) return null;
-  const ud = [];
+// Med flere aktive stationer: kurver for hver station for sig og overlappet mellem dem.
+// Overlap findes ved for hvert felt at se på den NÆSThurtigste stations tid: er den inden for
+// 10 min, kan mindst to stationer nå feltet på 10 min.
+async function kurverPrStation(st, kilder, x, tider, maxT, n, signal, gr) {
+  if (st.length < 2) return { perStation: null, overlap: null };
+  const ud = [], N = gr.nx * gr.ny;
+  const t1 = new Float32Array(N).fill(UOPNAAET), t2 = new Float32Array(N).fill(UOPNAAET);
   for (let i = 0; i < st.length; i++) {
     if (signal && signal.aborted) throw stopFejl();
-    status(`Tegner kurver for ${st[i].navn} (scenarie ${n}) …`); await pause();
+    status(`Finder overlap: ${st[i].navn} (scenarie ${n}) …`); await pause();
     const r1 = korDijkstra(G, [kilder[i]], x.tid, S, x.per, maxT);
-    const g1 = byggGitter(G, r1, x.tid, S, maxT);
+    const g1 = byggGitter(G, r1, x.tid, S, maxT, gr);   // samme net som den samlede beregning
+    if (g1) for (let c = 0; c < N; c++) { const v = g1.val[c]; if (v < t1[c]) { t2[c] = t1[c]; t1[c] = v; } else if (v < t2[c]) t2[c] = v; }
     const idx = S.stationer.findIndex(s => s.id === st[i].id);
     ud.push({ navn: st[i].navn, nr: idx + 1, farve: stationsFarve(idx), kumulativ: g1 ? lavKurver(g1, tider).kumulativ : tider.map(() => null) });
   }
-  return ud;
+  let har = false; for (let c = 0; c < N && !har; c++) if (t2[c] <= maxT) har = true;
+  const ov = har ? lavKurver({ ...gr, val: t2 }, tider) : null;
+  return { perStation: ud, overlap: ov ? ov.baand : null, overlapAreal: ov ? ov.kumulativ.map(f => f ? turf.area(f) / 1e6 : 0) : null };
 }
 async function beregn() {
   if (travl) return;
@@ -1563,8 +1574,8 @@ async function beregn() {
       const gr = byggGitter(G, x.res, x.tid, S, maxT);
       if (!gr) throw new Error('Brandbilen kan ikke komme nogen steder hen. Tjek spærringer og hastigheder.');
       const k = lavKurver(gr, tider);
-      const perStation = await kurverPrStation(st, sidsteKilder, x, tider, maxT, n, signal);
-      nyRes.scen[n] = { sc: x.sc, per: x.per, perStation, gr, ...k, areal: k.kumulativ.map(f => f ? turf.area(f) / 1e6 : 0), adresser: null };
+      const ps = await kurverPrStation(st, sidsteKilder, x, tider, maxT, n, signal, gr);
+      nyRes.scen[n] = { sc: x.sc, per: x.per, perStation: ps.perStation, overlap: ps.overlap, overlapAreal: ps.overlapAreal, gr, ...k, areal: k.kumulativ.map(f => f ? turf.area(f) / 1e6 : 0), adresser: null };
     }
     RES = nyRes; RES.radiusKm = Math.max(...R) / 1000;
     ADRESSER = null;
@@ -1590,51 +1601,57 @@ $('beregnKnap').onclick = beregn;
 /* ======================================================================
    DEL 7 – VIS RESULTATER PÅ KORTET OG I TABELLEN
    ====================================================================== */
-function farveFor(i) { const n = RES ? RES.tider.length : S.tider.length; const map = { 1: [0], 2: [0, 4], 3: [0, 2, 4], 4: [0, 2, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5] }; return FARVER[(map[n] || map[6])[i]]; }
+function farveNr(i) { const n = RES ? RES.tider.length : S.tider.length; const map = { 1: [0], 2: [0, 4], 3: [0, 2, 4], 4: [0, 2, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5] }; return (map[n] || map[6])[i]; }
+function farveFor(i) { return FARVER[farveNr(i)]; }
 
-/* ---------- Flere stationer: én farve pr. station ----------
-   Hver station tegnes for sig i sin egen farve, så det tydeligt ses, hvor stationerne overlapper.
-   Tiden vises med stregtype: fuld streg = korteste tid, stiplet = mellem, prikket = længste.
-   Fyldet lægges i lag, så farven bliver mørkere jo kortere tiden er. */
-const STATIONSFARVER = ['#1f6fd1', '#e0701b', '#8e3aa8', '#0f9488', '#c2308a', '#7a5a2b', '#5b7f1a', '#d4a10f'];
+/* ---------- Flere stationer: overlap vises med skravering ----------
+   Tidsintervallerne har altid hver sin farve (grøn → rød). Hvor mindst to stationer kan nå frem,
+   lægges en skravering ovenpå. Skraveringens farve viser, hvor hurtigt den næsthurtigste station
+   er fremme. Hver stations yderste kurve tegnes desuden som en stiplet linje i stationens farve. */
+const STATIONSFARVER = ['#1f6fd1', '#8e3aa8', '#0f9488', '#c2308a', '#3b4bc4', '#7a5a2b', '#1a8fb8', '#5a5f66'];
 function stationsFarve(i) { return STATIONSFARVER[((i % STATIONSFARVER.length) + STATIONSFARVER.length) % STATIONSFARVER.length]; }
 function flereAktive() { return S.stationer.filter(s => s.aktiv).length > 1; }
-function multiStreg(j, n) { return j === 0 ? null : (j === n - 1 && n > 2 ? [2, 5] : [8, 5]); }
-function multiStil(j, n, erB) {
-  const d = multiStreg(j, n);
-  return { weight: erB ? 1.3 : (j === 0 ? 2.8 : 2), dashArray: d ? d.join(' ') : null, opacity: erB ? 0.85 : 1 };
+const STATIONSSTREG = [10, 4, 2, 4];
+// Skraveringsmønstre (ét pr. tidsfarve) lægges i siden én gang
+(function lavSkravering() {
+  document.body.insertAdjacentHTML('beforeend', '<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>' +
+    FARVER.map((f, i) => `<pattern id="skr${i}" patternUnits="userSpaceOnUse" width="10" height="10" patternTransform="rotate(45)"><line x1="1" y1="0" x2="1" y2="10" stroke="${f.streg}" stroke-width="2"/></pattern>`).join('') + '</defs></svg>');
+  const st = document.createElement('style');
+  st.textContent = FARVER.map((f, i) => `path.skr${i}{fill:url(#skr${i})}`).join('');
+  document.head.appendChild(st);
+})();
+function tegnOverlap(lag, scen) {
+  const m = lag._map; if (!m) return;
+  if (!m.skr) m.skr = L.svg({ padding: 0.4 });   // skravering kræver SVG-tegning
+  (scen.overlap || []).forEach((f, i) => {
+    if (f) L.geoJSON(f, { interactive: false, renderer: m.skr, className: 'skr' + farveNr(i),
+      style: { renderer: m.skr, className: 'skr' + farveNr(i), color: farveFor(i).streg, weight: 1, opacity: 0.9, fill: true, fillColor: farveFor(i).streg, fillOpacity: 1 } }).addTo(lag);
+  });
+  for (const p of (scen.perStation || [])) {
+    const f = p.kumulativ[p.kumulativ.length - 1];
+    if (f) L.geoJSON(f, { interactive: false, renderer: m.skr, style: { renderer: m.skr, color: p.farve, weight: 2.2, fill: false, dashArray: STATIONSSTREG.join(' ') } }).addTo(lag);
+  }
 }
 function tegnLag(lag, scen, stil) {
-  if (scen.perStation) {
-    const n = RES.tider.length, erB = stil !== 'fyld';
-    for (const p of scen.perStation) {
-      for (let j = n - 1; j >= 0; j--) {
-        const f = p.kumulativ[j]; if (!f) continue;
-        L.geoJSON(f, { interactive: false, style: { color: p.farve, fillColor: p.farve, fill: !erB, fillOpacity: 0.11, ...multiStil(j, n, erB) } }).addTo(lag);
-      }
-    }
-    return;
-  }
   const n = scen.kumulativ.length;
   if (stil === 'fyld') {
     scen.baand.forEach((f, i) => { if (f) L.geoJSON(f, { interactive: false, style: { color: farveFor(i).streg, weight: 1.2, fillColor: farveFor(i).fyld, fillOpacity: 0.32 } }).addTo(lag); });
+    if (scen.perStation) tegnOverlap(lag, scen);
   } else {
     for (let i = n - 1; i >= 0; i--) { const f = scen.kumulativ[i]; if (f) L.geoJSON(f, { interactive: false, style: { color: farveFor(i).streg, weight: 2.6, dashArray: '7 5', fill: false } }).addTo(lag); }
   }
 }
 function legendeHTML(scenA, scenB, overlay) {
   const t = RES.tider;
-  if (scenA.perStation) {
-    const n = t.length, dash = j => { const d = multiStreg(j, n); return !d ? 'solid' : d[0] === 2 ? 'dotted' : 'dashed'; };
-    let h = `<h4>${overlay ? 'A: ' : ''}${esc(scenTekst(scenA.sc))}</h4>` +
-      scenA.perStation.map(p => `<div class="l"><i style="background:${p.farve};opacity:.75"></i>${p.nr} · ${esc(p.navn.length > 26 ? p.navn.slice(0, 25) + '…' : p.navn)}</div>`).join('') +
-      t.map((m, j) => `<div class="l"><i class="str" style="border-color:currentColor;border-top-style:${dash(j)}"></i>≤ ${fmt(m, m % 1 ? 1 : 0)} min</div>`).join('') +
-      `<div class="l" style="color:var(--muted);max-width:190px;line-height:1.3;margin-top:3px">Mørkere = kortere tid. Hvor farverne blandes, overlapper stationerne.</div>`;
-    if (overlay && scenB) h += `<h4 style="margin-top:6px">B: ${esc(scenTekst(scenB.sc))}</h4><div class="l" style="color:var(--muted)">Tynde linjer i samme farver</div>`;
-    return h;
-  }
   let h = `<h4>${overlay ? 'A: ' : ''}${esc(scenTekst(scenA.sc))}</h4>` + t.map((m, i) => `<div class="l"><i style="background:${farveFor(i).fyld}"></i>≤ ${fmt(m, m % 1 ? 1 : 0)} min</div>`).join('');
   if (overlay && scenB) h += `<h4 style="margin-top:6px">B: ${esc(scenTekst(scenB.sc))}</h4>` + t.map((m, i) => `<div class="l"><i class="str" style="border-color:${farveFor(i).streg}"></i>≤ ${fmt(m, m % 1 ? 1 : 0)} min</div>`).join('');
+  if (scenA.perStation) {
+    h += `<h4 style="margin-top:6px">Flere stationer</h4>` +
+      (scenA.overlap ? `<div class="l"><i style="background:repeating-linear-gradient(135deg,currentColor 0 2px,transparent 2px 5px)"></i>Overlap: nås af mindst to</div>
+        <div class="l" style="color:var(--muted);max-width:200px;line-height:1.3">Skraveringens farve viser tiden for den næsthurtigste station.</div>` : `<div class="l" style="color:var(--muted)">Ingen overlap inden for tiderne</div>`) +
+      scenA.perStation.map(p => `<div class="l"><i class="str" style="border-color:${p.farve};border-top-style:dashed"></i>${p.nr} · ${esc(p.navn.length > 24 ? p.navn.slice(0, 23) + '…' : p.navn)}</div>`).join('') +
+      `<div class="l" style="color:var(--muted)">Stiplet = stationens yderste kurve</div>`;
+  }
   return h;
 }
 function tegnResultater() {
@@ -1726,6 +1743,9 @@ function eksGeoJSON() {
       } });
     });
   }
+  for (const [n, sc] of Object.entries(RES.scen)) (sc.overlap || []).forEach((f, i) => {
+    if (f) feats.push({ type: 'Feature', geometry: f.geometry, properties: { type: 'overlap', scenarie: n, tidspunkt: scenTekst(sc.sc), beskrivelse: 'nås af mindst to stationer', naesthurtigste_inden_for_min: RES.tider[i] } });
+  });
   for (const [n, sc] of Object.entries(RES.scen)) (sc.perStation || []).forEach(p => p.kumulativ.forEach((f, i) => {
     if (f) feats.push({ type: 'Feature', geometry: f.geometry, properties: { scenarie: n, tidspunkt: scenTekst(sc.sc), station: p.navn, station_nr: p.nr, minutter: RES.tider[i], fill: p.farve, stroke: p.farve } });
   }));
@@ -1764,16 +1784,18 @@ async function kortTilCanvas(m, scen, overlayB) {
     c.lineWidth = st.bredde * sc; c.strokeStyle = st.streg; c.setLineDash(st.dash ? st.dash.map(v => v * sc) : st.stiplet ? [7 * sc, 5 * sc] : []); c.stroke(); c.setLineDash([]);
     c.globalAlpha = 1;
   };
-  const multi = !!scen.perStation, nT2 = RES.tider.length;
-  const tegnMulti = (sc0, erB) => { for (const p of sc0.perStation) for (let j = nT2 - 1; j >= 0; j--) {
-    const ms = multiStil(j, nT2, erB);
-    tegnF(p.kumulativ[j], { fyld: erB ? null : p.farve, alfa: 0.11, streg: p.farve, bredde: ms.weight, dash: multiStreg(j, nT2), stregAlfa: ms.opacity });
-  } };
-  if (multi) { tegnMulti(scen, false); if (overlayB && overlayB.perStation) tegnMulti(overlayB, true); }
-  else {
-    scen.baand.forEach((f, i) => tegnF(f, { fyld: farveFor(i).fyld, streg: farveFor(i).streg, bredde: 1.2 }));
-    if (overlayB) for (let i = overlayB.kumulativ.length - 1; i >= 0; i--) tegnF(overlayB.kumulativ[i], { streg: farveFor(i).streg, bredde: 2.6, stiplet: true });
-  }
+  const multi = !!scen.perStation;
+  scen.baand.forEach((f, i) => tegnF(f, { fyld: farveFor(i).fyld, streg: farveFor(i).streg, bredde: 1.2 }));
+  // Skravering: lille mønster-felt med skrå streger i tidsfarven
+  const skrMoenster = farve => {
+    const t = 14 * sc, p = document.createElement('canvas'); p.width = p.height = t;
+    const x = p.getContext('2d'); x.strokeStyle = farve; x.lineWidth = 2 * sc; x.lineCap = 'square';
+    for (const k of [-1, 0, 1]) { x.beginPath(); x.moveTo(k * t, t); x.lineTo(k * t + t, 0); x.stroke(); }
+    return c.createPattern(p, 'repeat');
+  };
+  if (multi) (scen.overlap || []).forEach((f, i) => tegnF(f, { fyld: skrMoenster(farveFor(i).streg), alfa: 1, streg: farveFor(i).streg, bredde: 1 }));
+  if (overlayB) for (let i = overlayB.kumulativ.length - 1; i >= 0; i--) tegnF(overlayB.kumulativ[i], { streg: farveFor(i).streg, bredde: 2.6, stiplet: true });
+  if (multi) for (const p of scen.perStation) tegnF(p.kumulativ[p.kumulativ.length - 1], { streg: p.farve, bredde: 2.2, dash: STATIONSSTREG });
   // Spærringer og stationer
   for (const s of S.sparringer) {
     const q = m.latLngToContainerPoint([s.lat, s.lon]), mpp = 40075016 * Math.cos(s.lat * Math.PI / 180) / (256 * nT);
@@ -1789,16 +1811,12 @@ async function kortTilCanvas(m, scen, overlayB) {
     c.fillStyle = '#fff'; c.font = `bold ${13 * sc}px Arial`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(String(idx + 1), q.x * sc, q.y * sc + sc);
   });
   // Legende
-  let rows;
+  const rows = [{ titel: (overlayB ? 'A: ' : '') + scenTekst(scen.sc) }, ...RES.tider.map((t, i) => ({ t, i }))];
+  if (overlayB) rows.push({ titel: 'B: ' + scenTekst(overlayB.sc) }, ...RES.tider.map((t, i) => ({ t, i, b: true })));
   if (multi) {
-    rows = [{ titel: (overlayB ? 'A: ' : '') + scenTekst(scen.sc) },
-      ...scen.perStation.map(p => ({ farve: p.farve, tekst: `${p.nr} · ${p.navn.length > 26 ? p.navn.slice(0, 25) + '…' : p.navn}` })),
-      ...RES.tider.map((t, j) => ({ t, dash: multiStreg(j, nT2) || [] })),
-      { note: 'Mørkere = kortere tid' }];
-    if (overlayB) rows.push({ titel: 'B: ' + scenTekst(overlayB.sc) }, { note: 'Tynde linjer i samme farver' });
-  } else {
-    rows = [{ titel: (overlayB ? 'A: ' : '') + scenTekst(scen.sc) }, ...RES.tider.map((t, i) => ({ t, i }))];
-    if (overlayB) rows.push({ titel: 'B: ' + scenTekst(overlayB.sc) }, ...RES.tider.map((t, i) => ({ t, i, b: true })));
+    rows.push({ titel: 'Flere stationer' });
+    rows.push(scen.overlap ? { skr: true, tekst: 'Overlap: nås af mindst to' } : { note: 'Ingen overlap inden for tiderne' });
+    for (const p of scen.perStation) rows.push({ linje: p.farve, tekst: `${p.nr} · ${p.navn.length > 24 ? p.navn.slice(0, 23) + '…' : p.navn}` });
   }
   const lh = 18 * sc, lw = (multi ? 240 : 190) * sc, lx = 12 * sc, ly = H - (rows.length * lh + 18 * sc) - 12 * sc;
   c.fillStyle = 'rgba(255,255,255,.93)'; c.fillRect(lx, ly, lw, rows.length * lh + 14 * sc);
@@ -1808,9 +1826,10 @@ async function kortTilCanvas(m, scen, overlayB) {
     const y = ly + 8 * sc + j * lh + lh / 2;
     if (r.titel) { c.fillStyle = '#1b2124'; c.font = `bold ${12 * sc}px Arial`; c.fillText(r.titel, lx + 10 * sc, y); return; }
     if (r.note) { c.fillStyle = '#5b666b'; c.font = `${11 * sc}px Arial`; c.fillText(r.note, lx + 10 * sc, y); return; }
-    if (r.farve) { c.globalAlpha = .75; c.fillStyle = r.farve; c.fillRect(lx + 10 * sc, y - 6 * sc, 20 * sc, 12 * sc); c.globalAlpha = 1; c.fillStyle = '#1b2124'; c.font = `${12 * sc}px Arial`; c.fillText(r.tekst, lx + 38 * sc, y); return; }
-    if (r.dash) { c.strokeStyle = '#1b2124'; c.lineWidth = 2.2 * sc; c.setLineDash(r.dash.map(v => v * sc)); c.beginPath(); c.moveTo(lx + 10 * sc, y); c.lineTo(lx + 30 * sc, y); c.stroke(); c.setLineDash([]);
-      c.fillStyle = '#1b2124'; c.font = `${12 * sc}px Arial`; c.fillText(`≤ ${String(r.t).replace('.', ',')} min`, lx + 38 * sc, y); return; }
+    if (r.skr) { c.fillStyle = skrMoenster('#1b2124'); c.fillRect(lx + 10 * sc, y - 6 * sc, 20 * sc, 12 * sc); c.strokeStyle = '#1b2124'; c.lineWidth = sc; c.strokeRect(lx + 10 * sc, y - 6 * sc, 20 * sc, 12 * sc);
+      c.fillStyle = '#1b2124'; c.font = `${12 * sc}px Arial`; c.fillText(r.tekst, lx + 38 * sc, y); return; }
+    if (r.linje) { c.strokeStyle = r.linje; c.lineWidth = 2.2 * sc; c.setLineDash(STATIONSSTREG.map(v => v * sc)); c.beginPath(); c.moveTo(lx + 8 * sc, y); c.lineTo(lx + 32 * sc, y); c.stroke(); c.setLineDash([]);
+      c.fillStyle = '#1b2124'; c.font = `${12 * sc}px Arial`; c.fillText(r.tekst, lx + 38 * sc, y); return; }
     const f = farveFor(r.i);
     if (r.b) { c.strokeStyle = f.streg; c.lineWidth = 2.6 * sc; c.setLineDash([5 * sc, 3 * sc]); c.beginPath(); c.moveTo(lx + 10 * sc, y); c.lineTo(lx + 30 * sc, y); c.stroke(); c.setLineDash([]); }
     else { c.globalAlpha = .6; c.fillStyle = f.fyld; c.fillRect(lx + 10 * sc, y - 6 * sc, 20 * sc, 12 * sc); c.globalAlpha = 1; }
