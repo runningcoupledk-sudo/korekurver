@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: write
+  pages: write
 
 concurrency:
   group: vejdata
@@ -44,3 +45,8 @@ jobs:
           git commit -q -m "Opdater vejdata ($(date +%F))" || { echo "Ingen ændringer"; exit 0; }
           git pull -q --rebase origin main
           git push -q origin HEAD:main
+      # Ændringer, som opgaven selv gemmer, starter ikke en ny udgivelse af siden af sig selv
+      - name: Udgiv siden med de nye felter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || echo "Kunne ikke starte udgivelsen – den sker ved næste ændring"

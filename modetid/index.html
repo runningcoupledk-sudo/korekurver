@@ -389,7 +389,7 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
           <h3>Test en bopæl</h3>
           <p>Søg en adresse eller klik på kortet. Programmet finder nærmeste vej, regner mødetiden for hvert tidspunkt og tegner ruten. Grøn betyder inden for den længste mødetid, rød betyder over.</p>
           <h3>Hentning af vejnet</h3>
-          <p>Vejnettet hentes fra OpenStreetMaps gratis servere i felter på ca. 9 × 9 km. Første gang i et område tager det typisk ½–2 minutter, og du kan følge fremdriften nederst i panelet. Felterne gemmes i browseren i 30 dage, så næste beregning går hurtigt. Svarer en server ikke inden for 90 sekunder, prøver programmet automatisk en anden.</p>
+          <p>Vejnettet for hele Danmark ligger som færdige felter på ca. 9 × 9 km ved siden af programmet og opdateres hver måned fra OpenStreetMap. De hentes på få sekunder og gemmes i browseren i 30 dage. Uden for Danmark, eller hvis serviceveje er slået til, hentes vejnettet i stedet fra OpenStreetMaps gratis servere – det tager typisk ½–2 minutter første gang.</p>
           <h3>Fart på hvert vejstykke</h3>
           <ul>
             <li>Udgangspunkt: skiltet hastighed fra OpenStreetMap, ellers "Uden skilt" for vejtypen – ganget med "Kør med %".</li>
@@ -896,7 +896,7 @@ function tidVedPunkt(gr, lat, lon) {
 
 /* Tegner kurverne ud fra feltnettet (Turf "isobands").
    kumulativ[i] = alt inden for tider[i] minutter.  baand[i] = ringen mellem to tider (til farvelægning). */
-function lavKurver(gr, tider) {
+function lavKurver(gr, tider, hvad = 'alt') {   // hvad: 'alt', 'baand' (kun ringene) eller 'yderste' (kun længste tid)
   const { val, nx, ny, celle, originLat, originLon, kx, ky } = gr;
   const pts = new Array(nx * ny);
   for (let iy = 0; iy < ny; iy++) {
@@ -912,8 +912,9 @@ function lavKurver(gr, tider) {
     if (!f || !f.geometry || !f.geometry.coordinates.length) return null;
     try { return turf.simplify(f, { tolerance: tol, highQuality: false }); } catch (e) { return f; }
   };
-  const kumulativ = tider.map(t => forenkl(turf.isobands(fc, [-1, t], { zProperty: 't' }).features[0]));
-  const baand = turf.isobands(fc, [-1, ...tider], { zProperty: 't' }).features.map(forenkl);
+  const sidste = tider.length - 1;
+  const kumulativ = hvad === 'baand' ? [] : tider.map((t, i) => (hvad === 'yderste' && i !== sidste) ? null : forenkl(turf.isobands(fc, [-1, t], { zProperty: 't' }).features[0]));
+  const baand = hvad === 'yderste' ? [] : turf.isobands(fc, [-1, ...tider], { zProperty: 't' }).features.map(forenkl);
   return { kumulativ, baand };
 }
 /* CORE-END */
@@ -1588,11 +1589,54 @@ function slank(el) {
   return { type: el.type, id: el.id, lat: el.lat, lon: el.lon };
 }
 
-/* Henter ét felt: fra mellemlageret, ellers fra serverne. Er feltet for tungt, deles det i fire. */
-async function hentFelt(f, slags, lavQ, signal, dybde) {
+/* Færdige vejnet-felter for hele Danmark ligger som filer ved siden af appen (bygges hver måned
+   fra OpenStreetMap). De hentes først – hurtigt og uden begrænsninger. Overpass-serverne er kun
+   reserve: uden for Danmark, med serviceveje slået til, eller hvis filerne ikke kan hentes. */
+const STATISK_URL = 'https://runningcoupledk-sudo.github.io/korekurver/data/vej/';
+let statiskLover = null;
+function hentStatiskIndeks() {
+  if (!statiskLover) statiskLover = (async () => {
+    try {
+      const r = await fetch(STATISK_URL + 'index.json', { cache: 'no-cache' });
+      if (!r.ok) return null;
+      const d = await r.json();
+      return { dato: d.dato, felter: new Set(d.felter) };
+    } catch (e) { return null; }
+  })().then(x => { if (!x) statiskLover = null; return x; });   // prøv igen næste gang, hvis det mislykkedes
+  return statiskLover;
+}
+// Pakker et færdigt felt ud til samme form, som Overpass-svarene har
+function udpakStatisk(d) {
+  const el = [];
+  for (const [id, hw, ms, ow, ju, nodes, ko] of d.w) {
+    const geometry = new Array(nodes.length);
+    for (let k = 0; k < nodes.length; k++) geometry[k] = { lat: ko[2 * k] / 1e6, lon: ko[2 * k + 1] / 1e6 };
+    const tags = { highway: hw };
+    if (ms) tags.maxspeed = ms; if (ow) tags.oneway = ow; if (ju) tags.junction = ju;
+    el.push({ type: 'way', id, nodes, geometry, tags });
+  }
+  for (const id of d.s) el.push({ type: 'node', id });
+  for (const [id, tags, medl] of d.r) el.push({ type: 'relation', id, tags, members: medl.map(m => ({ type: m[0], ref: m[1], role: m[2] })) });
+  return el;
+}
+async function hentStatiskFelt(f, signal) {
+  const r = await fetch(STATISK_URL + f.id + '.json', { signal });
+  if (!r.ok) throw new Error('HTTP-fejl ' + r.status);
+  return udpakStatisk(await r.json());
+}
+
+/* Henter ét felt: fra mellemlageret, ellers som færdigt felt, ellers fra Overpass-serverne.
+   Er feltet for tungt for Overpass, deles det i fire. */
+async function hentFelt(f, slags, lavQ, signal, dybde, statisk) {
   const noegle = slags + '|' + f.id;
   const gemt = await lagerHent(noegle);
   if (gemt) return { el: gemt, lager: true };
+  if (statisk && dybde === 0) {
+    if (statisk.felter.has(f.id)) {
+      try { const el = await hentStatiskFelt(f, signal); lagerGem(noegle, el); return { el }; }
+      catch (e) { if (signal?.aborted) throw stopFejl(); }       // ellers: prøv Overpass nedenfor
+    } else if (statisk.daekker) { lagerGem(noegle, []); return { el: [] }; }   // hav eller uden for Danmark: ingen veje
+  }
   try {
     const d = await overpass(lavQ(f), signal, dybde < 2);
     const el = d.elements.map(slank);
@@ -1601,7 +1645,7 @@ async function hentFelt(f, slags, lavQ, signal, dybde) {
   } catch (e) {
     if (e.stop || !e.tung || dybde >= 2) throw e;
     const ud = [];
-    for (const del of delFelt(f)) ud.push(...(await hentFelt(del, slags, lavQ, signal, dybde + 1)).el);
+    for (const del of delFelt(f)) ud.push(...(await hentFelt(del, slags, lavQ, signal, dybde + 1, null)).el);
     lagerGem(noegle, ud);   // gemmes samlet, så feltet ikke skal deles igen næste gang
     return { el: ud };
   }
@@ -1615,7 +1659,10 @@ async function hentFelter(felter, slags, lavQ, signal, tekst) {
   let faerdige = 0, fraLager = 0, runde = 1;
   const t0 = Date.now();
   const vis = () => status(`${tekst}: ${faerdige} af ${felter.length} felter (${Math.round((Date.now() - t0) / 1000)} sek.)` +
-    (fraLager ? ` – ${fraLager} fra mellemlageret` : '') + (runde > 1 ? ' – prøver de sidste igen' : '. Første gang i et område tager typisk ½–2 min.'));
+    (fraLager ? ` – ${fraLager} fra mellemlageret` : '') + (runde > 1 ? ' – prøver de sidste igen' : statisk && statisk.daekker ? '.' : '. Første gang i et område tager typisk ½–2 min.'));
+  // Færdige felter for Danmark (kun vejnet uden serviceveje)
+  const statisk = slags === 'vej' ? await hentStatiskIndeks() : null;
+  if (statisk) statisk.daekker = felter.some(f => statisk.felter.has(f.id));
   vis();
   const ur = setInterval(vis, 1000);
   let sidsteFejl = null;
@@ -1625,7 +1672,7 @@ async function hentFelter(felter, slags, lavQ, signal, tekst) {
       while (kø.length) {
         const f = kø.shift();
         try {
-          const r = await hentFelt(f, slags, lavQ, signal, 0);
+          const r = await hentFelt(f, slags, lavQ, signal, 0, statisk);
           if (r.lager) fraLager++;
           for (const e of r.el) samlet.set(e.type[0] + e.id, e);
           faerdige++; vis();
@@ -1640,7 +1687,8 @@ async function hentFelter(felter, slags, lavQ, signal, tekst) {
   };
   const gemt = { ...NET };
   try {
-    let mangler = await koer(felter, NET.samtidige);
+    // Færdige felter kan hentes mange ad gangen; Overpass kun to
+    let mangler = await koer(felter, statisk && statisk.daekker ? 6 : NET.samtidige);
     if (mangler.length) {
       // Anden runde: én ad gangen, længere ventetid og serverne får et øjeblik til at komme sig
       runde = 2; vis();
@@ -1697,7 +1745,7 @@ async function kurverPrStation(st, kilder, x, tider, maxT, n, signal, gr) {
     const g1 = byggGitter(G, r1, x.tid, S, maxT, gr);   // samme net som den samlede beregning
     vals.push(g1 ? g1.val : null);
     const idx = S.stationer.findIndex(s => s.id === st[i].id);
-    ud.push({ navn: st[i].navn, nr: idx + 1, farve: stationsFarve(idx), kumulativ: g1 ? lavKurver(g1, tider).kumulativ : tider.map(() => null), baand: [] });
+    ud.push({ navn: st[i].navn, nr: idx + 1, farve: stationsFarve(idx), kumulativ: g1 ? lavKurver(g1, tider, 'yderste').kumulativ : tider.map(() => null), baand: [] });
   }
   // Hurtigste (ejer) og næsthurtigste (anden) station i hvert felt
   const t1 = new Float32Array(N).fill(UOPNAAET), t2 = new Float32Array(N).fill(UOPNAAET);
@@ -1718,8 +1766,8 @@ async function kurverPrStation(st, kilder, x, tider, maxT, n, signal, gr) {
       if (x0 < UOPNAAET && (ejer[c] === i || (ix > 0 && ejer[c - 1] === i) || (ix < nx - 1 && ejer[c + 1] === i) || (iy > 0 && ejer[c - nx] === i) || (iy < ny - 1 && ejer[c + nx] === i))) { v[c] = x0; harOmr = true; }
       if (anden[c] === i && t2[c] <= maxT) { o[c] = t2[c]; harOv = true; }
     }
-    ud[i].baand = harOmr ? lavKurver({ ...gr, val: v }, tider).baand : tider.map(() => null);
-    if (harOv) overlap.push({ navn: ud[i].navn, nr: ud[i].nr, farve: ud[i].farve, baand: lavKurver({ ...gr, val: o }, tider).baand });
+    ud[i].baand = harOmr ? lavKurver({ ...gr, val: v }, tider, 'baand').baand : tider.map(() => null);
+    if (harOv) overlap.push({ navn: ud[i].navn, nr: ud[i].nr, farve: ud[i].farve, baand: lavKurver({ ...gr, val: o }, tider, 'baand').baand });
   }
   // Overlappets areal (km²) inden for hver tid
   const feltKm2 = gr.celle * gr.celle / 1e6;
