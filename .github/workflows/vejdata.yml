@@ -1,0 +1,46 @@
+# Bygger færdige vejnet-felter for hele Danmark, så apps'ene ikke skal hente vejnettet
+# fra de gratis Overpass-servere. Kører den 3. i hver måned, og kan startes i hånden
+# under fanen "Actions" → "Byg vejdata" → "Run workflow".
+name: Byg vejdata
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 3 * *'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/byg_vejdata.py'
+      - '.github/workflows/vejdata.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vejdata
+  cancel-in-progress: false
+
+jobs:
+  byg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Installer læser til OpenStreetMap-filer
+        run: pip install osmium
+      - name: Hent Danmark fra Geofabrik
+        run: curl -fL --retry 3 --retry-delay 20 -o /tmp/danmark.osm.pbf https://download.geofabrik.de/europe/denmark-latest.osm.pbf
+      - name: Byg felter
+        run: python3 tools/byg_vejdata.py /tmp/danmark.osm.pbf data/vej
+      - name: Gem felterne i repositoryet
+        run: |
+          du -sh data/vej
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data
+          git commit -q -m "Opdater vejdata ($(date +%F))" || { echo "Ingen ændringer"; exit 0; }
+          git pull -q --rebase origin main
+          git push -q origin HEAD:main
