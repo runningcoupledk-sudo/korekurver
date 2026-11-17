@@ -65,6 +65,20 @@ header.top h1 span{color:var(--accent)}
 header.top p{margin:0;color:var(--muted);font-size:14px}
 header.top a.app-link{margin-left:auto;color:var(--accent);font-weight:600;font-size:14px;text-decoration:none}
 header.top a.app-link:hover{text-decoration:underline}
+.bopael{display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line)}
+.bopael:last-child{border-bottom:0}
+.bopael .hus{width:22px;height:22px;border-radius:50%;background:var(--fg);color:var(--bg);display:grid;place-items:center;font:700 12px var(--f-display)}
+.bopael .tider{grid-column:2/-1;display:flex;gap:6px;flex-wrap:wrap;font:12px var(--f-mono)}
+.chip{display:inline-block;padding:1px 7px;border-radius:10px;font:600 12px var(--f-mono);font-variant-numeric:tabular-nums;border:1px solid var(--line)}
+.chip.ok{color:var(--ok);border-color:var(--ok)}
+.chip.nej{color:var(--err);border-color:var(--err)}
+.chip.ukendt{color:var(--muted)}
+.bopael .stn{font:12px var(--f-body);color:var(--muted)}
+#bopTabel table{margin-bottom:12px}
+#bopTabel td.navn{font-family:var(--f-body);white-space:normal;min-width:140px;text-align:left}
+#bopTabel th:nth-child(2),#bopTabel th:last-child{text-align:left}
+.bopael button.vis{border:0;background:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0;text-align:left}
+.husikon{background:var(--fg);color:var(--bg);border:2px solid #fff;border-radius:50%;display:grid!important;place-items:center;font:700 11px var(--f-display);box-shadow:0 1px 4px rgba(0,0,0,.4)}
 
 /* ---------- Sidepanel ---------- */
 aside.side{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line);background:var(--panel)}
@@ -217,6 +231,30 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
       </details>
 
       <details class="sek" open>
+        <summary>Test adresser <small id="antalBopael"></small></summary>
+        <div class="sek-indhold">
+          <div class="raekke">
+            <input type="search" id="bopSoeg" placeholder="Adresse, fx Østergade 10, Vejle" aria-label="Søg adresse">
+            <button class="knap" id="bopSoegKnap" style="flex:0 0 auto">Test</button>
+          </div>
+          <div class="soegeres" id="bopSoegeRes"></div>
+          <button class="knap" id="klikBopael">+ Markér adresser ved klik på kortet</button>
+          <details class="hint" id="flereBox"><summary style="cursor:pointer">Indsæt flere adresser på én gang</summary>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">
+              <textarea id="flereFelt" rows="5" placeholder="Én adresse pr. linje, fx&#10;Plejecenter Solgården, Birkerød&#10;Hovedgaden 20, 3460 Birkerød" aria-label="Flere adresser, én pr. linje" style="background:var(--field);border:1px solid var(--line);border-radius:4px;padding:6px 8px;font:inherit;color:inherit;resize:vertical;min-width:0;width:100%"></textarea>
+              <div class="knap-raekke"><button class="knap" id="flereKnap">Find adresserne</button></div>
+              <div id="flereStatus" class="hint"></div>
+            </div>
+          </details>
+          <div id="bopOverblik" class="hint" hidden></div>
+          <div id="bopaeleListe"></div>
+          <div class="knap-raekke" id="bopKnapper" hidden><button class="knap lille" data-act="ryd-bopaele">Fjern alle adresser</button></div>
+          <div id="rydBekraeft" class="hint" hidden style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">Fjern alle testede adresser? <button class="knap lille" data-act="ryd-ja">Ja, fjern</button> <button class="knap lille" data-act="ryd-nej">Fortryd</button></div>
+          <p class="hint">Se hvor hurtigt brandbilen er fremme ved bestemte adresser – fx plejehjem, skoler eller virksomheder med særlig risiko. Tiden regnes fra alarm (afgangstid + køretid). Klik på en adresse for at se ruten. Adresserne gemmes og regnes igen ved hver beregning (højst 50).</p>
+        </div>
+      </details>
+
+      <details class="sek" open>
         <summary>Tidspunkt</summary>
         <div class="sek-indhold">
           <div class="scen-boks a">
@@ -364,6 +402,8 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
           <p>Programmet henter alle veje omkring stationen fra OpenStreetMap og regner ud, hvor hurtigt brandbilen kan køre på hvert enkelt vejstykke. Derefter finder det – ligesom en GPS – den hurtigste vej fra stationen ud til alle punkter i vejnettet. Til sidst tegnes en kurve rundt om alt, der kan nås inden for 5, 10 og 15 minutter.</p>
           <h3>Afgangstid</h3>
           <p>Hver station har sin egen afgangstid på 1–7 minutter – tiden fra alarm, til bilen kører ud. Den lægges til, før køretiden begynder. Med flere stationer bruges den station, der samlet er hurtigst fremme, så en nærliggende deltidsstation kan blive overhalet af en heltidsstation længere væk.</p>
+          <h3>Test adresser</h3>
+          <p>Søg en adresse, klik på kortet eller indsæt en liste med én adresse pr. linje. Programmet finder nærmeste vej og regner tiden fra alarm, til brandbilen er der, for hvert tidspunkt – og viser, hvilken station der er hurtigst, og ruten. Farven følger kurverne: grøn, gul og rød for første, anden og tredje køretid.</p>
           <h3>Hentning af vejnet</h3>
           <p>Vejnettet for hele Danmark ligger som færdige felter på ca. 9 × 9 km ved siden af programmet og opdateres hver måned fra OpenStreetMap. De hentes på få sekunder og gemmes i browseren i 30 dage. Uden for Danmark, eller hvis serviceveje er slået til, hentes vejnettet i stedet fra OpenStreetMaps gratis servere – det tager typisk ½–2 minutter første gang.</p>
           <h3>Fart på hvert vejstykke</h3>
@@ -410,6 +450,7 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
         <h2>Resultater</h2>
         <button class="knap lille" data-act="tael-adresser" id="taelKnap" disabled>Tæl adresser og indbyggere</button>
       </div>
+      <div id="bopTabel"></div>
       <div id="resIndhold"><div class="tom">Ingen beregning endnu. Eksemplet viser en station i Odense – flyt den, eller søg din egen station frem.</div></div>
     </section>
   </main>
@@ -689,8 +730,19 @@ class MinHeap {
    kommer fra i et kryds – det er nødvendigt for svingforbud og U-vendinger.
    Hver station starter med sin egen afgangstid (tid fra alarm til bilen kører ud).
    Resultat: for hvert vejstykke den tid (min) fra alarm, hvor brandbilen er nået til enden af det. */
+// Liste over vejstykker, der ender i hvert punkt (bygges én gang pr. vejnet)
+function indgaaendeListe(G) {
+  if (G.indStart) return;
+  const st = new Int32Array(G.nK + 1);
+  for (let s = 0; s < G.nS; s++) st[G.sTil[s] + 1]++;
+  for (let k = 0; k < G.nK; k++) st[k + 1] += st[k];
+  const li = new Int32Array(G.nS), fy = st.slice(0, G.nK);
+  for (let s = 0; s < G.nS; s++) li[fy[G.sTil[s]]++] = s;
+  G.indStart = st; G.indListe = li;
+}
 function korDijkstra(G, kilder, tid, S, T, maxT) {
   const dist = new Float64Array(G.nS).fill(Infinity);
+  const forr = new Int32Array(G.nS).fill(-1);   // forrige vejstykke på den hurtigste rute (til at tegne ruter)
   const knudeT = new Float64Array(G.nK).fill(Infinity);
   // Ventetid i kryds (minutter) = brandbilens grundtid + andel af trafikkens ventetid.
   // Trafikken måles på den vigtigste vej i krydset.
@@ -731,10 +783,10 @@ function korDijkstra(G, kilder, tid, S, T, maxT) {
         forsink = mk < cs ? fVige[mk] : fPassage;
       }
       const nd = d + forsink + tt;
-      if (nd < dist[t]) { dist[t] = nd; kø.push(nd, t); }
+      if (nd < dist[t]) { dist[t] = nd; forr[t] = s; kø.push(nd, t); }
     }
   }
-  return { dist, knudeT };
+  return { dist, knudeT, forr };
 }
 
 // Finder det vejpunkt, der ligger nærmest stationen (ikke på motorvejen).
@@ -849,6 +901,7 @@ function standardIndstillinger() {
   return {
     stationer: [{ id: uid(), navn: 'Eksempel – Odense centrum', lat: 55.3959, lon: 10.3883, aktiv: true, afgang: 2 }],
     tider: [5, 10, 15],
+    bopaele: [],      // testede adresser
     scenA: { dag: 'mantor', tid: '07:30' },
     sammenlign: true,
     scenB: { dag: 'sondag', tid: '03:00' },
@@ -923,6 +976,8 @@ function lavKort(id) {
     baand: L.layerGroup().addTo(m),
     streg: L.layerGroup().addTo(m),
     sparr: L.layerGroup().addTo(m),
+    rute: L.layerGroup().addTo(m),
+    bopael: L.layerGroup().addTo(m),
     stationer: L.layerGroup().addTo(m)
   };
   return m;
@@ -1106,7 +1161,7 @@ function opdaterLayout() {
 }
 
 function renderAlt() {
-  udfyldFelter(); renderStationer(); renderVejTabel(); renderPeriodeVisning(); renderSparringer(); opdaterRadiusHint(); saetBaggrund();
+  udfyldFelter(); renderStationer(); renderVejTabel(); renderPeriodeVisning(); renderSparringer(); renderBopaele(); opdaterRadiusHint(); saetBaggrund();
 }
 
 /* Markører på kortet */
@@ -1149,13 +1204,15 @@ function saetKlikTilstand(t) {
   $('klikStation').classList.toggle('aktiv', klikTilstand === 'station');
   $('klikLukket').classList.toggle('aktiv', klikTilstand === 'lukket');
   $('klikArbejde').classList.toggle('aktiv', klikTilstand === 'arbejde');
-  const tekst = { station: 'Klik på kortet for at placere en station', lukket: 'Klik på vejen, der er lukket', arbejde: 'Klik på vejen med vejarbejde' }[klikTilstand];
+  $('klikBopael').classList.toggle('aktiv', klikTilstand === 'bopael');
+  const tekst = { station: 'Klik på kortet for at placere en station', lukket: 'Klik på vejen, der er lukket', arbejde: 'Klik på vejen med vejarbejde', bopael: 'Klik på hver adresse, du vil teste' }[klikTilstand];
   $('banner').hidden = !tekst; $('banner').textContent = (tekst || '') + ' · Esc for at stoppe';
   for (const id of ['kortA', 'kortB']) $(id).classList.toggle('klikmode', !!klikTilstand);
 }
 $('klikStation').onclick = () => saetKlikTilstand('station');
 $('klikLukket').onclick = () => saetKlikTilstand('lukket');
 $('klikArbejde').onclick = () => saetKlikTilstand('arbejde');
+$('klikBopael').onclick = () => saetKlikTilstand('bopael');
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && klikTilstand) saetKlikTilstand(klikTilstand); });
 
 function kortKlik(e) {
@@ -1164,6 +1221,11 @@ function kortKlik(e) {
   if (klikTilstand === 'station') {
     S.stationer.push({ id: uid(), navn: `Station ${S.stationer.length + 1}`, lat, lon: lng, aktiv: true, afgang: 2 });
     renderStationer(); saetKlikTilstand('station');
+  } else if (klikTilstand === 'bopael') {
+    // Tilstanden forbliver aktiv, så flere adresser kan markeres i træk (Esc eller knappen stopper)
+    const b = nyBopael(`Punkt ${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng);
+    if (b) navnFraPunkt(b);
+    return;
   } else {
     S.sparringer.push({ id: uid(), type: klikTilstand, lat, lon: lng, radius: Number($('sparRadius').value) || 30, fald: Number($('sparFald').value) || 50, note: '' });
     renderSparringer();
@@ -1183,6 +1245,8 @@ $('side').addEventListener('change', e => {
   } else v = el.value;
   saetSti(S, k, v); gem();
   if (k.startsWith('stationer')) { renderStationer(); opdaterRadiusHint(); }
+  if (k.startsWith('bopaele')) { renderBopaele(); return; }
+  if (k === 'visning' || k === 'sammenlign') renderBopaele();
   if (k.startsWith('sparringer')) { tegnSparringer(); }
   if (k.startsWith('scen') || k.startsWith('trafik') || k.startsWith('krydsGrund') || k === 'sammenlign' || k === 'udrykning') renderPeriodeVisning();
   if (k === 'kort') saetBaggrund();
@@ -1212,6 +1276,17 @@ document.addEventListener('click', async e => {
     case 'eks-png': eksPNG(); return;
     case 'eks-pdf': eksPDF(); return;
     case 'tael-adresser': taelAdresser(); return;
+    case 'ryd-bopaele': $('rydBekraeft').hidden = false; return;
+    case 'ryd-nej': $('rydBekraeft').hidden = true; return;
+    case 'ryd-ja': S.bopaele = []; valgtBopael = -1; $('rydBekraeft').hidden = true; gem(); renderBopaele(); return;
+    case 'slet-bopael': S.bopaele.splice(i, 1); if (valgtBopael >= S.bopaele.length) valgtBopael = S.bopaele.length - 1; gem(); renderBopaele(); return;
+    case 'vis-bopael': valgtBopael = i; renderBopaele(); {
+      // Zoom, så både adressen og hele ruten fra stationen kan ses
+      const b = S.bopaele[i]; if (!b) return;
+      const x = RES ? bopaelTid(RES.scen.A, b.lat, b.lon) : null;
+      if (x && x.rute) kortA.fitBounds(L.latLngBounds([[b.lat, b.lon], ...x.rute]), { padding: [40, 40], maxZoom: 16 });
+      else kortA.setView([b.lat, b.lon], Math.max(kortA.getZoom(), 13));
+    } return;
     case 'ryd-cache': await lagerRyd(); G = null; CACHE = null; ADRESSER = null; status('Mellemlageret er ryddet. Næste beregning henter vejnettet forfra.', 'ok'); return;
     default: return;
   }
@@ -1243,6 +1318,181 @@ async function soeg() {
   } catch (err) { $('soegeRes').innerHTML = '<span class="hint">Søgningen fejlede. Tjek internetforbindelsen.</span>'; }
 }
 $('soegKnap').onclick = soeg;
+
+/* ---------- Test adresser ----------
+   Hvor hurtigt er brandbilen fremme ved en bestemt adresse? (internt hedder de "bopaele") */
+let valgtBopael = -1;
+const MAX_BOPAELE = 50;
+function nyBopael(navn, lat, lon, stille) {
+  if (S.bopaele.length >= MAX_BOPAELE) { status(`Der kan højst være ${MAX_BOPAELE} adresser. Fjern nogle først.`, 'fejl'); return null; }
+  const b = { id: uid(), navn, lat, lon };
+  S.bopaele.push(b);
+  valgtBopael = S.bopaele.length - 1;
+  gem(); if (!stille) renderBopaele();
+  if (!RES) status('Adressen er tilføjet. Tryk "Beregn kørekurver" for at se, hvor hurtigt brandbilen er fremme.', 'adv');
+  else if (kmTilStation(b) > MAX_BOPAEL_KM) status(`Adressen ligger ${fmt(kmTilStation(b), 0)} km fra nærmeste station – for langt væk til at regne køretid.`, 'adv');
+  else if (udenforOmraade(b)) status('Adressen ligger uden for det beregnede område. Tryk "Beregn kørekurver" for at få dens tid.', 'adv');
+  return b;
+}
+// Nominatim må højst bruges ca. én gang i sekundet – alle opslag går gennem denne kø
+let nomKoe = Promise.resolve(), nomSidst = 0;
+function nominatim(url) {
+  const job = nomKoe.then(async () => {
+    const vent = Math.max(0, nomSidst + 1100 - Date.now()); if (vent) await new Promise(r => setTimeout(r, vent));
+    nomSidst = Date.now();
+    const r = await fetch(url); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json();
+  });
+  nomKoe = job.catch(() => {});
+  return job;
+}
+// Klikkede punkter får adressen som navn (fx "Skovvej 4, Tommerup")
+async function navnFraPunkt(b) {
+  try {
+    const r = await nominatim(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&accept-language=da&lat=${b.lat}&lon=${b.lon}`);
+    const a = (r && r.address) || {};
+    const navn = [[a.road, a.house_number].filter(Boolean).join(' '), a.village || a.town || a.city || a.suburb].filter(Boolean).join(', ');
+    if (navn && b.navn.startsWith('Punkt ')) { b.navn = navn; gem(); renderBopaele(); }
+  } catch (e) {}
+}
+// Flere adresser på én gang: slås op én ad gangen
+async function findFlere() {
+  const linjer = $('flereFelt').value.split(/\n/).map(x => x.trim()).filter(Boolean);
+  if (!linjer.length) return;
+  $('flereKnap').disabled = true;
+  const ikke = []; let fundet = 0;
+  for (let i = 0; i < linjer.length; i++) {
+    if (S.bopaele.length >= MAX_BOPAELE) { ikke.push(...linjer.slice(i).map(l => l + ' (over grænsen på ' + MAX_BOPAELE + ')')); break; }
+    $('flereStatus').textContent = `Slår op: ${i + 1} af ${linjer.length} – ${linjer[i]}`;
+    try {
+      const r = await nominatim('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=dk&accept-language=da&q=' + encodeURIComponent(linjer[i]));
+      if (r && r.length) { nyBopael(linjer[i], Number(r[0].lat), Number(r[0].lon), true); fundet++; } else ikke.push(linjer[i]);
+    } catch (e) { ikke.push(linjer[i] + ' (fejl ved opslag)'); }
+  }
+  renderBopaele();
+  $('flereFelt').value = ikke.map(l => l.replace(/ \((over grænsen.*|fejl ved opslag)\)$/, '')).join('\n');
+  $('flereStatus').innerHTML = `Fandt ${fundet} af ${linjer.length}.` + (ikke.length ? ` Ikke fundet: ${ikke.map(esc).join('; ')}. De står tilbage i feltet, så du kan rette dem.` : '');
+  $('flereKnap').disabled = false;
+  if (RES && fundet) status('Tryk "Beregn kørekurver" igen, hvis nogle af de nye adresser ligger uden for det beregnede område.', 'adv');
+}
+$('flereKnap').onclick = findFlere;
+async function soegBopael() {
+  const q = $('bopSoeg').value.trim(); if (!q) return;
+  $('bopSoegeRes').innerHTML = '<span class="hint">Søger…</span>';
+  try {
+    const r = await nominatim('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=dk&accept-language=da&q=' + encodeURIComponent(q));
+    if (!r.length) { $('bopSoegeRes').innerHTML = '<span class="hint">Intet fundet. Prøv med postnummer eller by.</span>'; return; }
+    $('bopSoegeRes').innerHTML = r.map((x, i) => `<button data-br="${i}">${esc(x.display_name)}</button>`).join('');
+    $('bopSoegeRes').querySelectorAll('[data-br]').forEach(bt => bt.onclick = () => {
+      const x = r[Number(bt.dataset.br)];
+      $('bopSoegeRes').innerHTML = ''; $('bopSoeg').value = '';
+      nyBopael(x.display_name.split(',').slice(0, 2).join(','), Number(x.lat), Number(x.lon));
+      kortA.setView([Number(x.lat), Number(x.lon)], Math.max(kortA.getZoom(), 13));
+    });
+  } catch (err) { $('bopSoegeRes').innerHTML = '<span class="hint">Søgningen fejlede. Tjek internetforbindelsen.</span>'; }
+}
+$('bopSoegKnap').onclick = soegBopael;
+$('bopSoeg').addEventListener('keydown', e => { if (e.key === 'Enter') soegBopael(); });
+
+// Ligger adressen uden for det område, vejnettet er hentet for?
+function udenforOmraade(b) {
+  if (!CACHE || !CACHE.centre) return true;
+  return !CACHE.centre.some(c => afstand(b.lat, b.lon, c.lat, c.lon) <= c.R * 0.95);
+}
+const MAX_VEJAFSTAND = 400;   // m – længere fra en vej regnes adressen ikke
+const MAX_BOPAEL_KM = 30;     // adresser længere fra nærmeste station regnes ikke med
+function kmTilStation(b) { const st = S.stationer.filter(x => x.aktiv); return st.length ? Math.min(...st.map(x => afstand(b.lat, b.lon, x.lat, x.lon))) / 1000 : Infinity; }
+// Tid fra alarm til brandbilen er ved et punkt: nærmeste station → hurtigste rute ud til nærmeste vej (huskes pr. beregning)
+function bopaelTid(sc, lat, lon) {
+  if (!G || !sc || !sc.res) return null;
+  const memo = sc.bopMemo || (sc.bopMemo = new Map()), noegle = lat + ',' + lon;
+  if (memo.has(noegle)) return memo.get(noegle);
+  const svar = bopaelTidUdregn(sc, lat, lon);
+  memo.set(noegle, svar);
+  return svar;
+}
+function bopaelTidUdregn(sc, lat, lon) {
+  if (udenforOmraade({ lat, lon })) { const km = kmTilStation({ lat, lon }); return km > MAX_BOPAEL_KM ? { fjern: true, luftKm: km } : { udenfor: true }; }
+  const k = naermesteKnude(G, lat, lon);
+  if (k.idx < 0) return { fejl: 'ingen vej' };
+  if (k.afstand > MAX_VEJAFSTAND) return { fejl: 'langt fra vej', afstand: k.afstand };
+  const { knudeT, dist, forr } = sc.res;
+  const t = knudeT[k.idx];
+  if (!isFinite(t)) return { over: true, afstand: k.afstand };
+  // Følg ruten baglæns: fra det hurtigste vejstykke ind i punktet og tilbage til stationen
+  indgaaendeListe(G);
+  let s = -1, bd = Infinity;
+  for (let i = G.indStart[k.idx]; i < G.indStart[k.idx + 1]; i++) { const x = G.indListe[i]; if (dist[x] < bd) { bd = dist[x]; s = x; } }
+  const rute = [[G.lat[k.idx], G.lon[k.idx]]]; let meter = 0, n = 0, start = k.idx;
+  while (s >= 0 && n++ < 20000) { start = G.sFra[s]; rute.push([G.lat[start], G.lon[start]]); meter += G.sLaengde[s]; s = forr[s]; }
+  rute.reverse();
+  // Hvilken station kører brandbilen fra?
+  const si = RES && RES.kildeKnuder ? RES.kildeKnuder.indexOf(start) : -1;
+  return { t, rute, km: meter / 1000, afstand: k.afstand, station: si >= 0 ? RES.stationer[si].navn : null };
+}
+function tidTekst(t) { const m = Math.floor(t + 1e-9), sek = Math.round((t - m) * 60); return sek === 60 ? `${m + 1}:00` : `${m}:${String(sek).padStart(2, '0')}`; }
+// Farve efter, hvilken kurve tiden ligger i (samme farver som på kortet)
+function tidFarve(t) { if (!RES || t == null) return null; const j = RES.tider.findIndex(m => t <= m); return j >= 0 ? farveFor(j).streg : null; }
+function bopaelChip(x, navn) {
+  if (!x) return `<span class="chip ukendt">${navn} –</span>`;
+  if (x.fjern) return `<span class="chip nej">${navn} ${fmt(x.luftKm, 0)} km væk</span>`;
+  if (x.udenfor) return `<span class="chip ukendt" title="Tryk Beregn kørekurver for at regne denne adresse med">${navn} uden for området</span>`;
+  if (x.fejl === 'langt fra vej') return `<span class="chip ukendt">${navn} ${fmt(x.afstand, 0)} m fra nærmeste vej</span>`;
+  if (x.fejl) return `<span class="chip ukendt">${navn} ingen vej</span>`;
+  if (x.over) return `<span class="chip nej">${navn} over ${fmt(RES.soegT, 0)} min</span>`;
+  const f = tidFarve(x.t);
+  return f ? `<span class="chip" style="color:${f};border-color:${f}">${navn} ${tidTekst(x.t)} min</span>` : `<span class="chip nej">${navn} ${tidTekst(x.t)} min</span>`;
+}
+function husIkon(i, valgt) { return L.divIcon({ className: 'husikon', html: String(i + 1), iconSize: valgt ? [26, 26] : [22, 22], iconAnchor: valgt ? [13, 13] : [11, 11] }); }
+function bopaelTekst(x) { return !x ? '–' : x.fjern ? `${fmt(x.luftKm, 0)} km væk – for langt` : x.udenfor ? 'uden for området' : x.fejl === 'langt fra vej' ? `${fmt(x.afstand, 0)} m fra vej` : x.fejl ? 'ingen vej' : x.over ? `over ${fmt(RES.soegT, 0)} min` : tidTekst(x.t) + ' min'; }
+function renderBopaele() {
+  const A = RES ? RES.scen.A : null, B = RES && S.sammenlign ? RES.scen.B : null;
+  const res = S.bopaele.map(b => ({ a: A ? bopaelTid(A, b.lat, b.lon) : null, b: B ? bopaelTid(B, b.lat, b.lon) : null }));
+  const flere = RES && RES.stationer.length > 1;
+  // Overblik: hvor mange adresser nås inden for hver køretid
+  $('bopOverblik').hidden = !(RES && S.bopaele.length);
+  $('bopKnapper').hidden = !S.bopaele.length;
+  if (RES && S.bopaele.length) {
+    const ok = (sc, m) => res.filter(x => x[sc] && x[sc].t != null && x[sc].t <= m).length;
+    const udenfor = res.filter(x => x.a && x.a.udenfor).length;
+    $('bopOverblik').innerHTML = `Nås ved A (${S.bopaele.length} adresser): ` + RES.tider.map(m => `<b>${ok('a', m)}</b> inden for ${fmt(m, m % 1 ? 1 : 0)} min`).join(' · ') +
+      (B ? `<br>Ved B: ` + RES.tider.map(m => `<b>${ok('b', m)}</b> inden for ${fmt(m, m % 1 ? 1 : 0)} min`).join(' · ') : '') + (udenfor ? `<br>${udenfor} ligger uden for området – tryk Beregn kørekurver igen.` : '');
+  }
+  $('bopaeleListe').innerHTML = S.bopaele.map((b, i) => `
+    <div class="bopael">
+      <span class="hus" style="${i === valgtBopael ? 'background:var(--accent)' : ''}">${i + 1}</span>
+      <input type="text" data-k="bopaele.${i}.navn" value="${esc(b.navn)}" aria-label="Navn på adresse">
+      <button class="ikonknap" data-act="slet-bopael" data-i="${i}" aria-label="Fjern adresse">×</button>
+      <div class="tider">${RES ? bopaelChip(res[i].a, 'A') + (B ? bopaelChip(res[i].b, 'B') : '') : '<span class="hint">Beregn for at se tiden</span>'}
+        ${RES && res[i].a && res[i].a.km != null ? `<span class="hint">${fmt(res[i].a.km, 1)} km ad vej${flere && res[i].a.station ? ' fra ' + esc(res[i].a.station) : ''}</span>` : ''}
+        <button class="vis" data-act="vis-bopael" data-i="${i}">Vis rute</button></div>
+    </div>`).join('');
+  $('antalBopael').textContent = S.bopaele.length ? `${S.bopaele.length} testet` : '';
+  // Tabel under kortet – nem at overskue og kopiere, når der er mange bopæle
+  $('bopTabel').innerHTML = RES && S.bopaele.length ? `<div class="res-top" style="margin-top:2px"><h2>Testede adresser</h2></div><div class="tab-wrap"><table class="res"><thead><tr><th>Nr.</th><th>Adresse</th><th>A · ${esc(scenTekst(A.sc))}</th>${B ? `<th>B · ${esc(scenTekst(B.sc))}</th>` : ''}<th>Km ad vej</th>${flere ? '<th>Station</th>' : ''}</tr></thead><tbody>` +
+    S.bopaele.map((b, i) => { const a = res[i].a, bb = res[i].b, kl = x => { const f = x && x.t != null ? tidFarve(x.t) : null; return x && x.t != null ? ` style="color:${f || 'var(--err)'};font-weight:600"` : ''; };
+      return `<tr><td>${i + 1}</td><td class="navn">${esc(b.navn)}</td><td${kl(a)}>${bopaelTekst(a)}</td>${B ? `<td${kl(bb)}>${bopaelTekst(bb)}</td>` : ''}<td>${a && a.km != null ? fmt(a.km, 1) : '–'}</td>${flere ? `<td class="navn">${a && a.station ? esc(a.station) : '–'}</td>` : ''}</tr>`; }).join('') +
+    '</tbody></table></div>' : '';
+  // Kort: markører og rute for den valgte bopæl
+  for (const m of [kortA, kortB]) { m.lag.bopael.clearLayers(); m.lag.rute.clearLayers(); }
+  S.bopaele.forEach((b, i) => {
+    const tips = [b.navn];
+    if (RES) tips.push('A: ' + bopaelTekst(res[i].a));
+    if (B) tips.push('B: ' + bopaelTekst(res[i].b));
+    for (const m of [kortA, kortB]) L.marker([b.lat, b.lon], { icon: husIkon(i, i === valgtBopael), title: b.navn })
+      .bindTooltip(tips.map(esc).join('<br>'), { direction: 'top', offset: [0, -10] })
+      .on('click', () => { valgtBopael = i; renderBopaele(); })
+      .addTo(m.lag.bopael);
+  });
+  const v = res[valgtBopael];
+  if (v) {
+    if (v.a && v.a.rute) L.polyline(v.a.rute, { color: '#1f5fbf', weight: 5, opacity: .85 }).addTo(kortA.lag.rute);
+    if (v.b && v.b.rute) {
+      const side = S.visning === 'side';
+      L.polyline(v.b.rute, { color: '#1f5fbf', weight: side ? 5 : 3, opacity: .85, dashArray: side ? null : '6 6' }).addTo(side ? kortB.lag.rute : kortA.lag.rute);
+    }
+  }
+}
+
 $('soegFelt').addEventListener('keydown', e => { if (e.key === 'Enter') soeg(); });
 
 function status(t, kl = '') { const s = $('status'); s.textContent = t; s.className = 'status ' + kl; }
@@ -1602,6 +1852,13 @@ async function beregn() {
     const auto = !(Number(S.beregning.radiusKm) > 0);
     // Hver station får sin egen radius (ved automatisk valg ud fra stationens egen afgangstid)
     let R = st.map(s => (auto ? autoRadius(maxT, [s]) : Number(S.beregning.radiusKm)) * 1000);
+    // Testede adresser op til 30 km væk regnes med: området om nærmeste station gøres stort nok
+    for (const b of S.bopaele) {
+      const d = st.map(s => afstand(b.lat, b.lon, s.lat, s.lon)), dmin = Math.min(...d), i = d.indexOf(dmin);
+      if (dmin <= MAX_BOPAEL_KM * 1000) R[i] = Math.max(R[i], dmin + 2000);
+    }
+    // Adresser testes op til 15 min ud over den længste køretid (det går hurtigt)
+    const soegT = maxT + 15;
     const scen = [['A', S.scenA]]; if (S.sammenlign) scen.push(['B', S.scenB]);
     let nyRes, sidsteKilder = [];
     // Ved automatisk radius udvides området selv, hvis kurven når ud til kanten (højst to gange)
@@ -1624,7 +1881,7 @@ async function beregn() {
         if (signal.aborted) throw stopFejl();
         const per = trafikTilstand(S, sc.dag, sc.tid);
         const tid = segmentTider(G, S, per);
-        const res = korDijkstra(G, kilder, tid, S, per, maxT);
+        const res = korDijkstra(G, kilder, tid, S, per, soegT);
         const k0 = naarKanten(res, maxT);
         if (k0.size) { kant.push(n); for (const i of k0) kantStationer.add(i); }
         nyRes.scen[n] = { sc: { ...sc }, per, tid, res };
@@ -1645,11 +1902,11 @@ async function beregn() {
       if (!gr) throw new Error('Brandbilen kan ikke komme nogen steder hen. Tjek spærringer og hastigheder.');
       const k = lavKurver(gr, tider);
       const ps = await kurverPrStation(st, sidsteKilder, x, tider, maxT, n, signal, gr);
-      nyRes.scen[n] = { sc: x.sc, per: x.per, perStation: ps.perStation, overlap: ps.overlap, overlapAreal: ps.overlapAreal, gr, ...k, areal: k.kumulativ.map(f => f ? turf.area(f) / 1e6 : 0), adresser: null };
+      nyRes.scen[n] = { sc: x.sc, per: x.per, res: x.res, perStation: ps.perStation, overlap: ps.overlap, overlapAreal: ps.overlapAreal, gr, ...k, areal: k.kumulativ.map(f => f ? turf.area(f) / 1e6 : 0), adresser: null };
     }
-    RES = nyRes; RES.radiusKm = Math.max(...R) / 1000;
+    RES = nyRes; RES.radiusKm = Math.max(...R) / 1000; RES.soegT = soegT; RES.kildeKnuder = sidsteKilder.map(k => k.idx);
     ADRESSER = null;
-    opdaterLayout(); tegnResultater(); visResultater();
+    opdaterLayout(); tegnResultater(); visResultater(); renderBopaele();
     const yderst = RES.scen.A.kumulativ.filter(Boolean).pop();
     if (yderst) kortA.fitBounds(L.geoJSON(yderst).getBounds(), { padding: [20, 20] });
     $('taelKnap').disabled = false;
@@ -1841,6 +2098,11 @@ function eksGeoJSON() {
     if (f) feats.push({ type: 'Feature', geometry: f.geometry, properties: { scenarie: n, tidspunkt: scenTekst(sc.sc), station: p.navn, station_nr: p.nr, minutter: RES.tider[i], fill: p.farve, stroke: p.farve } });
   }));
   RES.stationer.forEach(s => feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lon, s.lat] }, properties: { type: 'brandstation', navn: s.navn, afgangstid_min: afgangstid(s.afgang) } }));
+  S.bopaele.forEach(b => {
+    const p = { type: 'testet adresse', navn: b.navn };
+    for (const [n, sc] of Object.entries(RES.scen)) { const x = bopaelTid(sc, b.lat, b.lon); p['tid_fra_alarm_' + n + '_min'] = x && x.t != null ? Math.round(x.t * 100) / 100 : null; if (x && x.station) p['station_' + n] = x.station; }
+    feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [b.lon, b.lat] }, properties: p });
+  });
   S.sparringer.forEach(s => feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lon, s.lat] }, properties: { type: s.type === 'lukket' ? 'lukket vej' : 'vejarbejde', radius_m: s.radius, nedsat_pct: s.type === 'lukket' ? null : s.fald, note: s.note || '' } }));
   hentFil(new Blob([JSON.stringify({ type: 'FeatureCollection', name: 'korekurver', features: feats })], { type: 'application/geo+json' }), `korekurver-${datoStempel()}.geojson`);
   status('GeoJSON gemt.', 'ok');
@@ -1896,6 +2158,11 @@ async function kortTilCanvas(m, scen, overlayB) {
     c.fillStyle = s.type === 'lukket' ? 'rgba(179,38,30,.35)' : 'rgba(217,138,0,.35)'; c.fill();
     c.strokeStyle = s.type === 'lukket' ? '#b3261e' : '#d98a00'; c.lineWidth = 2 * sc; c.stroke();
   }
+  S.bopaele.forEach((b, i) => {
+    const q = m.latLngToContainerPoint([b.lat, b.lon]);
+    c.beginPath(); c.arc(q.x * sc, q.y * sc, 10 * sc, 0, Math.PI * 2); c.fillStyle = '#1b2124'; c.fill(); c.strokeStyle = '#fff'; c.lineWidth = 2 * sc; c.stroke();
+    c.fillStyle = '#fff'; c.font = `bold ${11 * sc}px Arial`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(String(i + 1), q.x * sc, q.y * sc + sc);
+  });
   RES.stationer.forEach((s, i) => {
     const q = m.latLngToContainerPoint([s.lat, s.lon]), r = 12 * sc;
     const idx = multi ? S.stationer.findIndex(x => x.id === s.id) : i;
@@ -1989,6 +2256,11 @@ async function eksPDF() {
     y += 2; linje('Kryds og trafik', true);
     linje(`Grundtid uden trafik: lyskryds ${S.krydsGrund.signal} sek. · rundkørsel ${S.krydsGrund.rundkorsel} sek. · vigepligt ${S.krydsGrund.kryds} sek.`);
     linje(`Trafikkens påvirkning efter Vejdirektoratets Håndbog Kapacitet og serviceniveau (2024): døgnprofil (fig. 10.5), hastighedskurver (fig. 4.20-4.22) og middelforsinkelse i kryds (fig. 5.4, 6.4, 7.1). Brandbilen får ${S.udrykning ? S.trafik.andelUdrykning : 100} % af forsinkelsen for almindelig trafik.`);
+    if (S.bopaele.length) {
+      y += 2; linje('Testede adresser (tid fra alarm)', true);
+      S.bopaele.forEach((b, i) => { const a = bopaelTid(A, b.lat, b.lon), bb = B ? bopaelTid(B, b.lat, b.lon) : null;
+        linje(`${i + 1}. ${b.navn}: A ${bopaelTekst(a)}` + (B ? ` · B ${bopaelTekst(bb)}` : '') + (a && a.km != null ? ` · ${fmt(a.km, 1)} km ad vej` : '') + (a && a.station && RES.stationer.length > 1 ? ` fra ${a.station}` : '')); });
+    }
     if (S.sparringer.length) { y += 2; linje('Spærringer og vejarbejde', true); S.sparringer.forEach(s => linje(`${s.type === 'lukket' ? 'Lukket vej' : 'Vejarbejde -' + s.fald + ' %'} ved ${s.lat.toFixed(5)}, ${s.lon.toFixed(5)} (radius ${s.radius} m)${s.note ? ' – ' + s.note : ''}`)); }
     y += 2; linje('Metode', true);
     linje('Vejnettet er hentet fra OpenStreetMap. For hvert vejstykke beregnes en fart ud fra vejtype, skiltet hastighed, udrykningstillæg, trafikfaktor og eventuelt vejarbejde. Den hurtigste rute fra nærmeste station findes med Dijkstras algoritme, hvor ensretning og registrerede svingforbud overholdes, og der lægges tid til i kryds. Områder inden for ' + S.beregning.vejbuffer + ' m af en nåelig vej medregnes. Kurverne er tegnet på et net med ca. ' + Math.round(A.gr.celle) + ' m opløsning. Indbyggertal er et skøn (adresser × ' + String(S.personerPrAdresse).replace('.', ',') + ').');
