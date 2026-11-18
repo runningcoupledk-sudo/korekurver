@@ -119,6 +119,10 @@ table.tab td.tal{font:13px var(--f-mono);font-variant-numeric:tabular-nums;text-
 .station{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line)}
 .station .afg{grid-column:2/-1;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
 .station .afg select{width:auto;padding:3px 6px;font-family:var(--f-mono);font-size:13px}
+.station .afg2{grid-column:2/-1;font-size:13px;color:var(--muted)}
+.station .dagvagt{grid-column:2/-1;border-left:3px solid var(--line);padding-left:10px;display:flex;flex-direction:column;gap:6px}
+.station .dagvagt .dage{display:flex;gap:10px;flex-wrap:wrap;font-size:13px}
+.station .dagvagt select{padding:6px 8px;font-family:var(--f-mono)}
 .station:last-child{border-bottom:0}
 .snr{width:24px;height:24px;border-radius:3px;background:var(--accent);color:var(--accent-fg);display:grid;place-items:center;font:700 13px var(--f-display)}
 .koord{grid-column:2/-1;font:12px var(--f-mono);color:var(--muted);margin-top:-4px}
@@ -212,6 +216,7 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
           </div>
           <div class="soegeres" id="soegeRes"></div>
           <button class="knap" id="klikStation">+ Placér station ved klik på kortet</button>
+          <button class="knap" id="nsbvKnap">Indlæs Nordsjællands stationer (6)</button>
           <div id="stationsListe"></div>
           <p class="hint">Træk i stationsmarkøren for at flytte den. Afgangstiden (1–7 min) er tiden fra alarm til bilen kører. Med flere aktive stationer viser kurverne, hvad den <b>hurtigst fremmødte</b> station kan nå.</p>
         </div>
@@ -223,7 +228,7 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
           <label class="f"><span>Kurver i minutter fra alarm (adskil med komma, højst 6)</span>
             <input type="text" id="tiderFelt" value="5, 10, 15">
           </label>
-          <p class="hint">Tiden regnes fra alarm: <b>afgangstid + køretid</b>. Afgangstiden (1–7 min) sættes for hver station under Brandstationer – fx 1–2 min for heltid og 5–7 min for deltid.</p>
+          <p class="hint">Tiden regnes fra alarm: <b>afgangstid + køretid</b>. Afgangstiden (1–7 min) sættes for hver station under Brandstationer. Har en station heltid i dele af døgnet, kan du give den en anden afgangstid i et tidsrum – så vælges den automatisk ud fra tidspunktet i scenarie A og B.</p>
           <label class="f"><span>Sæt samme afgangstid for alle stationer</span>
             <select id="alleAfgang"><option value="">Vælg …</option></select>
           </label>
@@ -401,7 +406,7 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
           <h3>Kort fortalt</h3>
           <p>Programmet henter alle veje omkring stationen fra OpenStreetMap og regner ud, hvor hurtigt brandbilen kan køre på hvert enkelt vejstykke. Derefter finder det – ligesom en GPS – den hurtigste vej fra stationen ud til alle punkter i vejnettet. Til sidst tegnes en kurve rundt om alt, der kan nås inden for 5, 10 og 15 minutter.</p>
           <h3>Afgangstid</h3>
-          <p>Hver station har sin egen afgangstid på 1–7 minutter – tiden fra alarm, til bilen kører ud. Den lægges til, før køretiden begynder. Med flere stationer bruges den station, der samlet er hurtigst fremme, så en nærliggende deltidsstation kan blive overhalet af en heltidsstation længere væk.</p>
+          <p>Hver station har sin egen afgangstid på 1–7 minutter – tiden fra alarm, til bilen kører ud. Den lægges til, før køretiden begynder. En station kan desuden have en anden afgangstid i et tidsrum, fx heltid på hverdage kl. 7–17; den bruges, når scenariets dag og klokkeslæt falder i tidsrummet. Med flere stationer bruges den station, der samlet er hurtigst fremme, så en nærliggende deltidsstation kan blive overhalet af en heltidsstation længere væk.</p>
           <h3>Test adresser</h3>
           <p>Søg en adresse, klik på kortet eller indsæt en liste med én adresse pr. linje. Programmet finder nærmeste vej og regner tiden fra alarm, til brandbilen er der, for hvert tidspunkt – og viser, hvilken station der er hurtigst, og ruten. Farven følger kurverne: grøn, gul og rød for første, anden og tredje køretid.</p>
           <h3>Hentning af vejnet</h3>
@@ -899,7 +904,7 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 
 function standardIndstillinger() {
   return {
-    stationer: [{ id: uid(), navn: 'Eksempel – Odense centrum', lat: 55.3959, lon: 10.3883, aktiv: true, afgang: 2 }],
+    stationer: [{ id: uid(), navn: 'Eksempel – Odense centrum', lat: 55.3959, lon: 10.3883, aktiv: true, afgang: 5, dagvagt: nyDagvagt() }],
     tider: [5, 10, 15],
     bopaele: [],      // testede adresser
     scenA: { dag: 'mantor', tid: '07:30' },
@@ -940,9 +945,21 @@ function hentIndstillinger() {
   try { const t = localStorage.getItem(GEM_NOEGLE); if (t) return retAfgang(flet(standardIndstillinger(), JSON.parse(t))); } catch (e) {}
   return standardIndstillinger();
 }
+/* Afgangstid efter tidspunkt (valgfrit): en station kan have en anden afgangstid i et tidsrum,
+   fx heltid på hverdage kl. 7–17. Uden for tidsrummet – og når det er slået fra – bruges
+   stationens almindelige afgangstid. */
+function nyDagvagt() { return { aktiv: false, dage: ['mantor', 'fredag'], fra: '07:00', til: '17:00', afgang: 2 }; }
+function afgangFor(s, dag, tid) {
+  const d = s.dagvagt;
+  if (d && d.aktiv && (d.dage || []).includes(dag)) {
+    const m = tilMinutter(tid), a = tilMinutter(d.fra), b = tilMinutter(d.til);
+    if (a <= b ? (m >= a && m < b) : (m >= a || m < b)) return afgangstid(d.afgang);
+  }
+  return afgangstid(s.afgang);
+}
 // Ældre indstillinger havde én fælles afmarchtid – nu har hver station sin egen afgangstid
 function retAfgang(x) {
-  for (const s of x.stationer) s.afgang = afgangstid(s.afgang ?? x.afmarch ?? 2);
+  for (const s of x.stationer) { s.afgang = afgangstid(s.afgang ?? x.afmarch ?? 5); s.dagvagt = { ...nyDagvagt(), ...(s.dagvagt || {}) }; }
   delete x.afmarch;
   // Fra ældre versioner: "hverdag" blev til mandag–torsdag, og de manuelle tidsrum er erstattet af trafikmodellen
   for (const sc of [x.scenA, x.scenB]) if (sc && !DAGE[sc.dag]) sc.dag = 'mantor';
@@ -1066,6 +1083,16 @@ function renderStationer() {
       <label class="afg">Afgangstid
         <select data-k="stationer.${i}.afgang" data-t="num" aria-label="Afgangstid for ${esc(s.navn)}">${afgangValg(s.afgang)}</select>
       </label>
+      <label class="chk afg2"><input type="checkbox" data-k="stationer.${i}.dagvagt.aktiv" ${s.dagvagt && s.dagvagt.aktiv ? 'checked' : ''}> Anden afgangstid i et tidsrum (fx heltid)</label>
+      ${s.dagvagt && s.dagvagt.aktiv ? `<div class="dagvagt">
+        <div class="dage">${Object.entries(DAGE).map(([k, n]) => `<label class="chk"><input type="checkbox" data-dvst="${i}" data-dag="${k}" ${s.dagvagt.dage.includes(k) ? 'checked' : ''}> ${DAG_KORT[k]}</label>`).join('')}</div>
+        <div class="raekke">
+          <label class="f"><span>Fra</span><input type="time" data-k="stationer.${i}.dagvagt.fra" value="${esc(s.dagvagt.fra)}"></label>
+          <label class="f"><span>Til</span><input type="time" data-k="stationer.${i}.dagvagt.til" value="${esc(s.dagvagt.til)}"></label>
+          <label class="f"><span>Afgangstid</span><select data-k="stationer.${i}.dagvagt.afgang" data-t="num" aria-label="Afgangstid i tidsrummet for ${esc(s.navn)}">${afgangValg(s.dagvagt.afgang)}</select></label>
+        </div>
+        <div class="hint">Uden for tidsrummet bruges afgangstiden ovenfor.</div>
+      </div>` : ''}
       <div class="koord">${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}</div>
     </div>`).join('') || '<p class="hint">Ingen stationer endnu.</p>';
   $('antalStationer').textContent = S.stationer.length ? `${S.stationer.filter(s => s.aktiv).length} aktiv(e)` : '';
@@ -1073,6 +1100,7 @@ function renderStationer() {
 }
 
 // Valgmuligheder 1–7 min i halve minutter
+const DAG_KORT = { mantor: 'Man–tor', fredag: 'Fre', lordag: 'Lør', sondag: 'Søn/hellig' };
 function afgangValg(valgt) {
   let h = '';
   for (let v = AFGANG_MIN; v <= AFGANG_MAX; v += 0.5) h += `<option value="${v}" ${Number(valgt) === v ? 'selected' : ''}>${String(v).replace('.', ',')} min</option>`;
@@ -1122,9 +1150,14 @@ function krydsTekst(T) {
   const sig = g.signal + T.andel * krydsTrafik('signal', B), rund = g.rundkorsel + T.andel * krydsTrafik('rundkorsel', B);
   return `Trafik: <b>${esc(T.navn)}</b> · brandbilen: lyskryds ca. ${fmt(sig, 0)} sek., rundkørsel ca. ${fmt(rund, 0)} sek. (byvej)`;
 }
+function afgangOversigt(sc) {
+  const st = S.stationer.filter(s => s.aktiv);
+  if (!st.some(s => s.dagvagt && s.dagvagt.aktiv)) return '';
+  return '<br>Afgangstid: ' + st.map(s => `${esc(s.navn)} <b>${String(afgangFor(s, sc.dag, sc.tid)).replace('.', ',')} min</b>`).join(' · ');
+}
 function renderPeriodeVisning() {
-  $('perA').innerHTML = krydsTekst(trafikTilstand(S, S.scenA.dag, S.scenA.tid));
-  $('perB').innerHTML = krydsTekst(trafikTilstand(S, S.scenB.dag, S.scenB.tid));
+  $('perA').innerHTML = krydsTekst(trafikTilstand(S, S.scenA.dag, S.scenA.tid)) + afgangOversigt(S.scenA);
+  $('perB').innerHTML = krydsTekst(trafikTilstand(S, S.scenB.dag, S.scenB.tid)) + afgangOversigt(S.scenB);
   $('scenBBoks').hidden = !S.sammenlign;
   renderTrafik();
 }
@@ -1149,7 +1182,7 @@ function opdaterRadiusHint() {
 // Når kurven alligevel ud til kanten, udvides området automatisk under beregningen.
 function autoRadius(maxT, stationer) {
   const st = (stationer || S.stationer).filter(s => s.aktiv);
-  const afg = st.length ? Math.min(...st.map(s => afgangstid(s.afgang))) : AFGANG_MIN;
+  const afg = st.length ? Math.min(...st.map(s => Math.min(afgangstid(s.afgang), s.dagvagt && s.dagvagt.aktiv ? afgangstid(s.dagvagt.afgang) : Infinity))) : AFGANG_MIN;
   return Math.min(40, Math.max(3, Math.max(maxT - afg, 1) * 1.3 + 1));
 }
 
@@ -1174,7 +1207,7 @@ function tegnStationer() {
     m.lag.stationer.clearLayers();
     S.stationer.forEach((s, i) => {
       const mk = L.marker([s.lat, s.lon], { icon: stationIkon(i), draggable: m === kortA, opacity: s.aktiv ? 1 : 0.45, title: s.navn });
-      mk.bindTooltip(`${esc(s.navn)} · afgang ${String(afgangstid(s.afgang)).replace('.', ',')} min`, { direction: 'top', offset: [0, -12] });
+      mk.bindTooltip(`${esc(s.navn)} · afgang ${String(afgangstid(s.afgang)).replace('.', ',')} min` + (s.dagvagt && s.dagvagt.aktiv ? ` (${String(afgangstid(s.dagvagt.afgang)).replace('.', ',')} min ${esc(s.dagvagt.fra)}–${esc(s.dagvagt.til)})` : ''), { direction: 'top', offset: [0, -12] });
       if (m === kortA) mk.on('dragend', e => {
         const p = e.target.getLatLng(); s.lat = p.lat; s.lon = p.lng; gem(); renderStationer(); markerForaeldet();
       });
@@ -1219,7 +1252,7 @@ function kortKlik(e) {
   if (!klikTilstand) return;
   const { lat, lng } = e.latlng;
   if (klikTilstand === 'station') {
-    S.stationer.push({ id: uid(), navn: `Station ${S.stationer.length + 1}`, lat, lon: lng, aktiv: true, afgang: 2 });
+    S.stationer.push({ id: uid(), navn: `Station ${S.stationer.length + 1}`, lat, lon: lng, aktiv: true, afgang: 5, dagvagt: nyDagvagt() });
     renderStationer(); saetKlikTilstand('station');
   } else if (klikTilstand === 'bopael') {
     // Tilstanden forbliver aktiv, så flere adresser kan markeres i træk (Esc eller knappen stopper)
@@ -1237,6 +1270,11 @@ kortA.on('click', kortKlik); kortB.on('click', kortKlik);
 // Alle felter med data-k opdaterer indstillingerne direkte
 $('side').addEventListener('change', e => {
   const el = e.target;
+  if (el.dataset.dvst !== undefined) {           // ugedag i en stations tidsrum
+    const d = S.stationer[Number(el.dataset.dvst)].dagvagt, dag = el.dataset.dag;
+    d.dage = el.checked ? [...new Set([...d.dage, dag])] : d.dage.filter(x => x !== dag);
+    gem(); renderStationer(); renderPeriodeVisning(); markerForaeldet(); return;
+  }
   const k = el.dataset.k; if (!k) return;
   let v;
   if (el.type === 'checkbox') v = el.checked;
@@ -1244,7 +1282,7 @@ $('side').addEventListener('change', e => {
     if (el.value === '') v = null; else { v = Number(String(el.value).replace(',', '.')); if (!isFinite(v)) return; }
   } else v = el.value;
   saetSti(S, k, v); gem();
-  if (k.startsWith('stationer')) { renderStationer(); opdaterRadiusHint(); }
+  if (k.startsWith('stationer')) { renderStationer(); opdaterRadiusHint(); renderPeriodeVisning(); }
   if (k.startsWith('bopaele')) { renderBopaele(); return; }
   if (k === 'visning' || k === 'sammenlign') renderBopaele();
   if (k.startsWith('sparringer')) { tegnSparringer(); }
@@ -1310,7 +1348,7 @@ async function soeg() {
     $('soegeRes').innerHTML = r.map((x, i) => `<button data-sr="${i}">${esc(x.display_name)}</button>`).join('');
     $('soegeRes').querySelectorAll('[data-sr]').forEach(bt => bt.onclick = () => {
       const x = r[Number(bt.dataset.sr)];
-      S.stationer.push({ id: uid(), navn: x.display_name.split(',').slice(0, 2).join(','), lat: Number(x.lat), lon: Number(x.lon), aktiv: true, afgang: 2 });
+      S.stationer.push({ id: uid(), navn: x.display_name.split(',').slice(0, 2).join(','), lat: Number(x.lat), lon: Number(x.lon), aktiv: true, afgang: 5, dagvagt: nyDagvagt() });
       $('soegeRes').innerHTML = ''; $('soegFelt').value = '';
       gem(); renderStationer(); markerForaeldet();
       kortA.setView([Number(x.lat), Number(x.lon)], 13);
@@ -1318,6 +1356,46 @@ async function soeg() {
   } catch (err) { $('soegeRes').innerHTML = '<span class="hint">Søgningen fejlede. Tjek internetforbindelsen.</span>'; }
 }
 $('soegKnap').onclick = soeg;
+
+/* Nordsjællands Brandvæsens stationer + Espergærde (Helsingør Beredskab).
+   Adresser fra nsbv.dk og blivbrandmandnu.dk. Placeringen slås op, når knappen trykkes. */
+const NSBV_STATIONER = [
+  { navn: 'Allerød Brandstation', adresse: 'Rørmosevænget 2, 3450 Allerød' },
+  { navn: 'Birkerød Brandstation', adresse: 'Birkerød Kongevej 160, 3460 Birkerød' },
+  { navn: 'Hørsholm Brandstation', adresse: 'Ådalsvej 52, 2970 Hørsholm' },
+  { navn: 'Nærum Brandstation', adresse: 'Rundforbivej 176, 2850 Nærum' },
+  { navn: 'Fredensborg Brandstation', adresse: 'Helsingørsvej 25, 3480 Fredensborg' },
+  { navn: 'Espergærde Brandstation', adresse: 'Bybjergvej 4, 3060 Espergærde' }
+];
+async function indlaesNSBV() {
+  const knap = $('nsbvKnap'); knap.disabled = true;
+  // Eksemplet fra Odense fjernes, hvis det er den eneste station
+  if (S.stationer.length === 1 && /^Eksempel/.test(S.stationer[0].navn)) S.stationer = [];
+  const tilfoejet = [], omtrent = [], ikke = [];
+  for (const p of NSBV_STATIONER) {
+    if (S.stationer.some(x => x.navn === p.navn)) continue;   // findes allerede
+    status(`Slår adressen op: ${p.navn} …`);
+    try {
+      const url = q => 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=dk&accept-language=da&q=' + encodeURIComponent(q);
+      let r = await nominatim(url(p.adresse)), naer = false;
+      if (!r || !r.length) { r = await nominatim(url(p.adresse.replace(/ \d+[A-Z]?,/, ','))); naer = true; }   // uden husnummer
+      if (r && r.length) {
+        S.stationer.push({ id: uid(), navn: p.navn, adresse: p.adresse, lat: Number(r[0].lat), lon: Number(r[0].lon), aktiv: true, afgang: 5, dagvagt: nyDagvagt() });
+        tilfoejet.push(p.navn); if (naer) omtrent.push(p.navn);
+      } else ikke.push(p.navn);
+    } catch (e) { ikke.push(p.navn); }
+  }
+  gem(); renderStationer(); opdaterRadiusHint(); if (typeof renderPeriodeVisning === 'function') renderPeriodeVisning(); markerForaeldet();
+  const st = S.stationer.filter(x => x.aktiv);
+  if (st.length) kortA.fitBounds(L.latLngBounds(st.map(x => [x.lat, x.lon])), { padding: [60, 60], maxZoom: 13 });
+  knap.disabled = false;
+  if (!tilfoejet.length && !ikke.length) { status('Stationerne er allerede indlæst.', 'ok'); return; }
+  status(`Indlæste ${tilfoejet.length} stationer med 5 min afgangstid.` +
+    (omtrent.length ? ` Placeringen er omtrentlig for ${omtrent.join(', ')} – træk markøren på plads.` : '') +
+    (ikke.length ? ` Kunne ikke finde ${ikke.join(', ')} – placér dem ved klik på kortet.` : '') +
+    (RES ? ' Tryk "Beregn" for at regne med dem.' : ''), ikke.length || omtrent.length ? 'adv' : 'ok');
+}
+$('nsbvKnap').onclick = indlaesNSBV;
 
 /* ---------- Test adresser ----------
    Hvor hurtigt er brandbilen fremme ved en bestemt adresse? (internt hedder de "bopaele") */
@@ -1871,7 +1949,6 @@ async function beregn() {
         if (k.idx < 0) throw new Error(`Ingen vej fundet ved ${s.navn}.`);
         if (k.afstand > 300) advarsler.push(`${s.navn} ligger ${Math.round(k.afstand)} m fra nærmeste vej`);
         kilder.push({ idx: k.idx, start: afgangstid(s.afgang) });
-        if (afgangstid(s.afgang) >= tider[0]) advarsler.push(`${s.navn} har afgangstid på ${String(afgangstid(s.afgang)).replace('.', ',')} min, så den når intet inden for ${tider[0]} min`);
       }
       nyRes = { tider, scen: {}, tidspunkt: new Date(), stationer: st.map(s => ({ ...s })) };
       sidsteKilder = kilder;
@@ -1881,10 +1958,14 @@ async function beregn() {
         if (signal.aborted) throw stopFejl();
         const per = trafikTilstand(S, sc.dag, sc.tid);
         const tid = segmentTider(G, S, per);
-        const res = korDijkstra(G, kilder, tid, S, per, soegT);
+        // Afgangstid efter tidspunktet i scenariet
+        const kSc = kilder.map((k, i) => ({ idx: k.idx, start: afgangFor(st[i], sc.dag, sc.tid) }));
+        const forSent = st.filter((x, i) => kSc[i].start >= tider[0]).map(x => x.navn.replace(/ Brandstation$/, ''));
+        if (forSent.length) advarsler.push(`ved ${n} når ${forSent.length === st.length ? 'ingen af stationerne noget' : forSent.join(', ') + ' intet'} inden for ${String(tider[0]).replace('.', ',')} min, fordi afgangstiden er mindst så lang`);
+        const res = korDijkstra(G, kSc, tid, S, per, soegT);
         const k0 = naarKanten(res, maxT);
         if (k0.size) { kant.push(n); for (const i of k0) kantStationer.add(i); }
-        nyRes.scen[n] = { sc: { ...sc }, per, tid, res };
+        nyRes.scen[n] = { sc: { ...sc }, per, tid, res, kilder: kSc };
       }
       if (!kant.length) break;
       // Udvid kun området om de stationer, hvis kurve når kanten
@@ -1901,8 +1982,8 @@ async function beregn() {
       const gr = byggGitter(G, x.res, x.tid, S, maxT);
       if (!gr) throw new Error('Brandbilen kan ikke komme nogen steder hen. Tjek spærringer og hastigheder.');
       const k = lavKurver(gr, tider);
-      const ps = await kurverPrStation(st, sidsteKilder, x, tider, maxT, n, signal, gr);
-      nyRes.scen[n] = { sc: x.sc, per: x.per, res: x.res, perStation: ps.perStation, overlap: ps.overlap, overlapAreal: ps.overlapAreal, gr, ...k, areal: k.kumulativ.map(f => f ? turf.area(f) / 1e6 : 0), adresser: null };
+      const ps = await kurverPrStation(st, x.kilder, x, tider, maxT, n, signal, gr);
+      nyRes.scen[n] = { sc: x.sc, per: x.per, res: x.res, kilder: x.kilder, perStation: ps.perStation, overlap: ps.overlap, overlapAreal: ps.overlapAreal, gr, ...k, areal: k.kumulativ.map(f => f ? turf.area(f) / 1e6 : 0), adresser: null };
     }
     RES = nyRes; RES.radiusKm = Math.max(...R) / 1000; RES.soegT = soegT; RES.kildeKnuder = sidsteKilder.map(k => k.idx);
     ADRESSER = null;
@@ -2016,6 +2097,12 @@ function tegnResultater() {
   }
 }
 
+// Stationernes afgangstid i resultatet – fx "Birkerød (A 2 min, B 5 min)"
+function afgangResTekst(s, i) {
+  const t = n => RES.scen[n] && RES.scen[n].kilder ? RES.scen[n].kilder[i].start : afgangstid(s.afgang);
+  const a = t('A'), b = RES.scen.B ? t('B') : a;
+  return a === b ? `${String(a).replace('.', ',')} min` : `A ${String(a).replace('.', ',')} min, B ${String(b).replace('.', ',')} min`;
+}
 function visResultater() {
   if (!RES) return;
   const A = RES.scen.A, B = RES.scen.B;
@@ -2034,7 +2121,7 @@ function visResultater() {
     h += '</tr>';
   });
   h += '</tbody></table></div>';
-  h += `<p class="hint" style="margin-top:6px">Trafik A: ${esc(A.per.navn)}${B ? ` · Trafik B: ${esc(B.per.navn)}` : ''} (Vejdirektoratets døgnprofil). Tid regnet fra alarm. Stationer (afgangstid): ${RES.stationer.map(s => `${esc(s.navn)} (${String(afgangstid(s.afgang)).replace('.', ',')} min)`).join(', ')}.${harAdr ? ' Indbyggertal er et skøn (adresser × ' + fmt(S.personerPrAdresse, 1) + ').' : ''}</p>`;
+  h += `<p class="hint" style="margin-top:6px">Trafik A: ${esc(A.per.navn)}${B ? ` · Trafik B: ${esc(B.per.navn)}` : ''} (Vejdirektoratets døgnprofil). Tid regnet fra alarm. Stationer (afgangstid): ${RES.stationer.map((s, i) => `${esc(s.navn)} (${afgangResTekst(s, i)})`).join(', ')}.${harAdr ? ' Indbyggertal er et skøn (adresser × ' + fmt(S.personerPrAdresse, 1) + ').' : ''}</p>`;
   $('resIndhold').innerHTML = h;
 }
 
@@ -2097,7 +2184,7 @@ function eksGeoJSON() {
   for (const [n, sc] of Object.entries(RES.scen)) (sc.perStation || []).forEach(p => p.kumulativ.forEach((f, i) => {
     if (f) feats.push({ type: 'Feature', geometry: f.geometry, properties: { scenarie: n, tidspunkt: scenTekst(sc.sc), station: p.navn, station_nr: p.nr, minutter: RES.tider[i], fill: p.farve, stroke: p.farve } });
   }));
-  RES.stationer.forEach(s => feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lon, s.lat] }, properties: { type: 'brandstation', navn: s.navn, afgangstid_min: afgangstid(s.afgang) } }));
+  RES.stationer.forEach(s => feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lon, s.lat] }, properties: { type: 'brandstation', navn: s.navn, ...Object.fromEntries(Object.entries(RES.scen).map(([n, sc]) => ['afgangstid_' + n + '_min', sc.kilder ? sc.kilder[RES.stationer.indexOf(s)].start : afgangstid(s.afgang)])) } }));
   S.bopaele.forEach(b => {
     const p = { type: 'testet adresse', navn: b.navn };
     for (const [n, sc] of Object.entries(RES.scen)) { const x = bopaelTid(sc, b.lat, b.lon); p['tid_fra_alarm_' + n + '_min'] = x && x.t != null ? Math.round(x.t * 100) / 100 : null; if (x && x.station) p['station_' + n] = x.station; }
@@ -2227,7 +2314,7 @@ async function eksPDF() {
     const overskrift = (t, y) => { doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.text(t, M, y); };
     overskrift('Kørekurver – responsområder', 16);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
-    doc.text(doc.splitTextToSize(`Beregnet ${RES.tidspunkt.toLocaleString('da-DK')} · Tid fra alarm (afgangstid + køretid) · Stationer: ${RES.stationer.map(s => `${s.navn} (afgang ${String(afgangstid(s.afgang)).replace('.', ',')} min)`).join(', ')}`, 297 - 24)[0], M, 22);
+    doc.text(doc.splitTextToSize(`Beregnet ${RES.tidspunkt.toLocaleString('da-DK')} · Tid fra alarm (afgangstid + køretid) · Stationer: ${RES.stationer.map((s, i) => `${s.navn} (afgang ${afgangResTekst(s, i)})`).join(', ')}`, 297 - 24)[0], M, 22);
     doc.setTextColor(0);
     const cvs = await billederTilEksport();
     const maxH = 150;
@@ -2247,7 +2334,7 @@ async function eksPDF() {
     let y = 25; doc.setFontSize(10);
     const linje = (t, b = false) => { doc.setFont('helvetica', b ? 'bold' : 'normal'); const l = doc.splitTextToSize(t, 297 - 2 * M); doc.text(l, M, y); y += l.length * 4.6 + (b ? 1 : 0); };
     linje('Kurver (tid fra alarm): ' + RES.tider.map(t => String(t).replace('.', ',') + ' min').join(', '));
-    linje('Afgangstid pr. station: ' + RES.stationer.map(s => `${s.navn} ${String(afgangstid(s.afgang)).replace('.', ',')} min`).join(' · '));
+    linje('Afgangstid pr. station: ' + RES.stationer.map((s, i) => `${s.navn} ${afgangResTekst(s, i)}` + (s.dagvagt && s.dagvagt.aktiv ? ` (tidsrum ${s.dagvagt.fra}–${s.dagvagt.til}: ${String(afgangstid(s.dagvagt.afgang)).replace('.', ',')} min)` : '')).join(' · '));
     linje(`Scenarie A: ${scenTekst(A.sc)} – trafik ${A.per.navn}` + (B ? ` · Scenarie B: ${scenTekst(B.sc)} – trafik ${B.per.navn}` : ''));
     linje(`Udrykningskørsel: ${S.udrykning ? 'ja' : 'nej'} · Skiltet hastighed fra OpenStreetMap: ${S.brugOsmHastighed ? 'ja' : 'nej'} · Kørsel mod ensretning: ${S.modEnsretning ? 'tilladt på by-/villaveje' : 'nej'}`);
     y += 2; linje('Hastigheder (km/t)', true);

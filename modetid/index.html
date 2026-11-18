@@ -214,6 +214,7 @@ table.res th.grp{text-align:center;border-bottom:2px solid var(--line)}
           </div>
           <div class="soegeres" id="soegeRes"></div>
           <button class="knap" id="klikStation">+ Placér station ved klik på kortet</button>
+          <button class="knap" id="nsbvKnap">Indlæs Nordsjællands stationer (6)</button>
           <div id="stationsListe"></div>
           <p class="hint">Træk i stationsmarkøren for at flytte den. Med flere aktive stationer viser kurverne, hvor man kan bo og nå frem til mindst én af dem.</p>
         </div>
@@ -1353,6 +1354,46 @@ async function soeg() {
   } catch (err) { $('soegeRes').innerHTML = '<span class="hint">Søgningen fejlede. Tjek internetforbindelsen.</span>'; }
 }
 $('soegKnap').onclick = soeg;
+
+/* Nordsjællands Brandvæsens stationer + Espergærde (Helsingør Beredskab).
+   Adresser fra nsbv.dk og blivbrandmandnu.dk. Placeringen slås op, når knappen trykkes. */
+const NSBV_STATIONER = [
+  { navn: 'Allerød Brandstation', adresse: 'Rørmosevænget 2, 3450 Allerød' },
+  { navn: 'Birkerød Brandstation', adresse: 'Birkerød Kongevej 160, 3460 Birkerød' },
+  { navn: 'Hørsholm Brandstation', adresse: 'Ådalsvej 52, 2970 Hørsholm' },
+  { navn: 'Nærum Brandstation', adresse: 'Rundforbivej 176, 2850 Nærum' },
+  { navn: 'Fredensborg Brandstation', adresse: 'Helsingørsvej 25, 3480 Fredensborg' },
+  { navn: 'Espergærde Brandstation', adresse: 'Bybjergvej 4, 3060 Espergærde' }
+];
+async function indlaesNSBV() {
+  const knap = $('nsbvKnap'); knap.disabled = true;
+  // Eksemplet fra Odense fjernes, hvis det er den eneste station
+  if (S.stationer.length === 1 && /^Eksempel/.test(S.stationer[0].navn)) S.stationer = [];
+  const tilfoejet = [], omtrent = [], ikke = [];
+  for (const p of NSBV_STATIONER) {
+    if (S.stationer.some(x => x.navn === p.navn)) continue;   // findes allerede
+    status(`Slår adressen op: ${p.navn} …`);
+    try {
+      const url = q => 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=dk&accept-language=da&q=' + encodeURIComponent(q);
+      let r = await nominatim(url(p.adresse)), naer = false;
+      if (!r || !r.length) { r = await nominatim(url(p.adresse.replace(/ \d+[A-Z]?,/, ','))); naer = true; }   // uden husnummer
+      if (r && r.length) {
+        S.stationer.push({ id: uid(), navn: p.navn, adresse: p.adresse, lat: Number(r[0].lat), lon: Number(r[0].lon), aktiv: true, afgang: 5 });
+        tilfoejet.push(p.navn); if (naer) omtrent.push(p.navn);
+      } else ikke.push(p.navn);
+    } catch (e) { ikke.push(p.navn); }
+  }
+  gem(); renderStationer(); opdaterRadiusHint(); if (typeof renderPeriodeVisning === 'function') renderPeriodeVisning(); markerForaeldet();
+  const st = S.stationer.filter(x => x.aktiv);
+  if (st.length) kortA.fitBounds(L.latLngBounds(st.map(x => [x.lat, x.lon])), { padding: [60, 60], maxZoom: 13 });
+  knap.disabled = false;
+  if (!tilfoejet.length && !ikke.length) { status('Stationerne er allerede indlæst.', 'ok'); return; }
+  status(`Indlæste ${tilfoejet.length} stationer med 5 min afgangstid.` +
+    (omtrent.length ? ` Placeringen er omtrentlig for ${omtrent.join(', ')} – træk markøren på plads.` : '') +
+    (ikke.length ? ` Kunne ikke finde ${ikke.join(', ')} – placér dem ved klik på kortet.` : '') +
+    (RES ? ' Tryk "Beregn" for at regne med dem.' : ''), ikke.length || omtrent.length ? 'adv' : 'ok');
+}
+$('nsbvKnap').onclick = indlaesNSBV;
 
 /* ---------- Test en bopæl ---------- */
 let valgtBopael = -1;
